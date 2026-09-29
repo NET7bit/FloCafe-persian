@@ -5321,6 +5321,62 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
       `);
     },
   },
+  {
+    version: 96,
+    name: 'add_purchase_returns',
+    up: () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS purchase_returns (
+          id TEXT PRIMARY KEY,
+          return_number TEXT NOT NULL UNIQUE,
+          purchase_invoice_id TEXT NOT NULL REFERENCES purchase_invoices(id),
+          supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+          return_date TEXT NOT NULL,
+          subtotal REAL NOT NULL DEFAULT 0,
+          tax_amount REAL NOT NULL DEFAULT 0,
+          total REAL NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'completed'
+            CHECK (status IN ('completed', 'deleted')),
+          reason TEXT,
+          created_by TEXT REFERENCES users(id),
+          deleted_by TEXT REFERENCES users(id),
+          deleted_at TEXT,
+          deletion_reason TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT '1970-01-01 00:00:00',
+          CHECK ((status = 'deleted') = (deleted_at IS NOT NULL))
+        );
+        CREATE INDEX IF NOT EXISTS idx_purchase_returns_invoice ON purchase_returns(purchase_invoice_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_returns_supplier ON purchase_returns(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_returns_date ON purchase_returns(return_date);
+        CREATE INDEX IF NOT EXISTS idx_purchase_returns_number ON purchase_returns(return_number);
+
+        CREATE TABLE IF NOT EXISTS purchase_return_items (
+          id TEXT PRIMARY KEY,
+          purchase_return_id TEXT NOT NULL REFERENCES purchase_returns(id) ON DELETE CASCADE,
+          purchase_invoice_item_id TEXT NOT NULL REFERENCES purchase_invoice_items(id),
+          supply_id TEXT NOT NULL REFERENCES supplies(id),
+          quantity REAL NOT NULL CHECK (quantity > 0),
+          unit TEXT NOT NULL CHECK (unit IN ('each', 'g', 'kg', 'ml', 'l')),
+          unit_price REAL NOT NULL DEFAULT 0 CHECK (unit_price >= 0),
+          tax_amount REAL NOT NULL DEFAULT 0 CHECK (tax_amount >= 0),
+          total REAL NOT NULL DEFAULT 0 CHECK (total >= 0),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_purchase_return_items_return ON purchase_return_items(purchase_return_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_return_items_supply ON purchase_return_items(supply_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_return_items_invoice_item ON purchase_return_items(purchase_invoice_item_id);
+
+        CREATE TABLE IF NOT EXISTS purchase_return_sequences (
+          name TEXT NOT NULL,
+          date TEXT NOT NULL,
+          current_value INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (name, date)
+        );
+      `);
+    },
+  },
 ];
 
 function syncBackupBeforeMigration(fromVersion: number, toVersion: number): void {
@@ -6173,6 +6229,46 @@ export function nextPurchaseInvoiceSequence(db: Database.Database, dateStamp: st
 /** Formats a purchase invoice number like `PINV-20260101-0001` for the given date. */
 export function formatPurchaseInvoiceNumber(dateStamp: string, sequence: number): string {
   return `PINV-${dateStamp}-${String(sequence).padStart(4, '0')}`;
+}
+
+/**
+ * Monotonic per-day counter for purchase return numbers. Kept in its own
+ * `purchase_return_sequences` table so return numbering never collides with
+ * purchase invoice or sales-side sequences.
+ */
+export function nextPurchaseReturnSequence(db: Database.Database, dateStamp: string): number {
+  return db.transaction(() => {
+    const updated = db.prepare(`
+      UPDATE purchase_return_sequences SET current_value = current_value + 1
+      WHERE name = ? AND date = ?
+    `).run('purchase_returns', dateStamp);
+
+    if (updated.changes === 0) {
+      try {
+        db.prepare(`
+          INSERT INTO purchase_return_sequences (name, date, current_value) VALUES (?, ?, 1)
+        `).run('purchase_returns', dateStamp);
+        return 1;
+      } catch (insertError) {
+        const retry = db.prepare(`
+          UPDATE purchase_return_sequences SET current_value = current_value + 1
+          WHERE name = ? AND date = ?
+        `).run('purchase_returns', dateStamp);
+        if (retry.changes === 0) {
+          throw new Error('Failed to generate sequence for purchase_returns', { cause: insertError });
+        }
+      }
+    }
+
+    const row = db.prepare('SELECT current_value FROM purchase_return_sequences WHERE name = ? AND date = ?')
+      .get('purchase_returns', dateStamp) as { current_value: number } | undefined;
+    return row?.current_value ?? 0;
+  })();
+}
+
+/** Formats a purchase return number like `PRET-2026-01-01-0001` for the given date. */
+export function formatPurchaseReturnNumber(dateStamp: string, sequence: number): string {
+  return `PRET-${dateStamp}-${String(sequence).padStart(4, '0')}`;
 }
 
 /** Atomically get the next sequence value for a given name and date. */
