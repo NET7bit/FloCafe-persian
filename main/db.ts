@@ -5438,6 +5438,35 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
       `);
     },
   },
+  {
+    version: 99,
+    name: 'add_receivables',
+    up: () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS receivable_entries (
+          id TEXT PRIMARY KEY,
+          customer_id TEXT NOT NULL REFERENCES customers(id),
+          entry_type TEXT NOT NULL CHECK (entry_type IN ('charge', 'settlement', 'adjustment')),
+          direction TEXT NOT NULL CHECK (direction IN ('debit', 'credit')),
+          amount REAL NOT NULL CHECK (amount > 0),
+          payment_method TEXT,
+          reference TEXT,
+          description TEXT,
+          entry_date TEXT NOT NULL,
+          created_by TEXT REFERENCES users(id),
+          notes TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CHECK ((entry_type = 'settlement') = (payment_method IS NOT NULL)),
+          CHECK (entry_type != 'charge' OR direction = 'debit'),
+          CHECK (entry_type != 'settlement' OR direction = 'credit')
+        );
+        CREATE INDEX IF NOT EXISTS idx_receivable_entries_customer ON receivable_entries(customer_id);
+        CREATE INDEX IF NOT EXISTS idx_receivable_entries_date ON receivable_entries(entry_date);
+        CREATE INDEX IF NOT EXISTS idx_receivable_entries_type ON receivable_entries(entry_type);
+        CREATE INDEX IF NOT EXISTS idx_receivable_entries_created_by ON receivable_entries(created_by);
+      `);
+    },
+  },
 ];
 
 function syncBackupBeforeMigration(fromVersion: number, toVersion: number): void {
