@@ -13,6 +13,7 @@ import { cashClosureRoutes } from './cash-closures';
 import { cashSessionRoutes } from './cash-sessions';
 import { inventoryRoutes } from './inventory';
 import { supplyRoutes } from './supplies';
+import { supplierRoutes } from './suppliers';
 import { recipeRoutes } from './recipes';
 import { tableRoutes } from './tables';
 import { kitchenStationRoutes } from './kitchen-stations';
@@ -95,6 +96,7 @@ export function registerRoutes(app: Express): void {
   app.use('/api/cash-sessions', cashSessionRoutes);
   app.use('/api/inventory', inventoryRoutes);
   app.use('/api/supplies', supplyRoutes);
+  app.use('/api/suppliers', supplierRoutes);
   app.use('/api/recipes', recipeRoutes);
   app.use('/api/tables', tableRoutes);
   app.use('/api/kitchen-stations', kitchenStationRoutes);

@@ -5213,6 +5213,37 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
       `);
     },
   },
+  {
+    version: 93,
+    name: 'add_suppliers',
+    up: () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS suppliers (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          code TEXT,
+          phone TEXT,
+          mobile TEXT,
+          national_id TEXT,
+          economic_code TEXT,
+          address TEXT,
+          notes TEXT,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          deleted_at TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        -- Uniqueness is scoped to live rows so a soft-deleted supplier's code
+        -- can be reused; the column itself stays unconstrained for NULLs.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_suppliers_code_unique
+          ON suppliers(code) WHERE deleted_at IS NULL;
+        CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(name COLLATE NOCASE);
+        CREATE INDEX IF NOT EXISTS idx_suppliers_mobile ON suppliers(mobile);
+        CREATE INDEX IF NOT EXISTS idx_suppliers_national_id ON suppliers(national_id);
+        CREATE INDEX IF NOT EXISTS idx_suppliers_active ON suppliers(is_active, deleted_at);
+      `);
+    },
+  },
 ];
 
 function syncBackupBeforeMigration(fromVersion: number, toVersion: number): void {
