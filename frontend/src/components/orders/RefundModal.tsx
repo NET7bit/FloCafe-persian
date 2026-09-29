@@ -27,6 +27,7 @@ const REFUND_IN_PROGRESS_WINDOW_MS = 60 * 60 * 1000;
 const BUILT_IN_PAYMENT_KEYS = {
   cash: 'methodCash',
   card: 'methodCard',
+  customer_account: 'methodCustomerAccount',
 } as const;
 
 // Refunds fail for many distinct reasons — surface the backend's own message instead

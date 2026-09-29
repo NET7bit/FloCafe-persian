@@ -55,7 +55,8 @@ type PosKey = keyof AppConfig['Messages']['pos'];
 const BUILT_IN_PAYMENT_KEYS = {
   cash: 'methodCash',
   card: 'methodCard',
-} as const satisfies Record<'cash' | 'card', PosKey>;
+  customer_account: 'methodCustomerAccount',
+} as const satisfies Record<'cash' | 'card' | 'customer_account', PosKey>;
 
 export default function PaymentModal({ bill, currency, onClose, onPaid, onBillUpdate }: Props) {
   const remaining = Number(bill.balance);
@@ -347,6 +348,10 @@ export default function PaymentModal({ bill, currency, onClose, onPaid, onBillUp
       .reduce((sum, p) => sum + toMinorUnits(toStoredUnit(Number(p.amount) || 0)), 0) + toMinorUnits(walletAmt);
     if (nonCashTotalMinor > remainingMinor) {
       toast.error(t('paymentAboveBalance'));
+      return;
+    }
+    if (payments.some((p) => p.method === 'customer_account' && (parseFloat(p.amount) || 0) > 0) && !effectiveCustomerId) {
+      toast.error(t('customerRequiredForAccount'));
       return;
     }
     if (totalPaymentMinor < remainingMinor) {

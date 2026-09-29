@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 
 
 import toast from 'react-hot-toast';
-import { Plus, Search, X, Edit, Wallet, History, TrendingUp, TrendingDown, AlertCircle } from 'lucide-react';
+import { Plus, Search, X, Edit, Wallet, History, TrendingUp, TrendingDown, AlertCircle, BookUser } from 'lucide-react';
 import { useSearchParams, useRouter } from 'next/navigation';
 
 import type { Customer } from '@/lib/types';
@@ -18,6 +18,7 @@ import { Ltr } from '@/components/layout/Ltr';
 import { useFormatCurrency } from '@/hooks/useFormatCurrency';
 import { useFormatDate } from '@/hooks/useFormatDate';
 import { useFormatNumber } from '@/hooks/useFormatNumber';
+import ReceivableLedgerModal from '@/components/customers/ReceivableLedgerModal';
 
 function SortIcon({ field, sortField, sortOrder }: { field: string; sortField: string; sortOrder: 'asc' | 'desc' }) {
   if (sortField !== field) return <span className="text-gray-300 w-3 inline-block ms-1 opacity-0 group-hover:opacity-100 transition-opacity">↕</span>;
@@ -52,6 +53,7 @@ export default function CustomersPage() {
   const [form, setForm] = useState({ name: '', phone: '', email: '', country_code: dialCode });
 
   const [ledgerCustomer, setLedgerCustomer] = useState<Customer | null>(null);
+  const [receivableCustomer, setReceivableCustomer] = useState<Customer | null>(null);
   const [ledgerData, setLedgerData] = useState<{
     balance: number;
     transactions: { id: number; type: string; amount: number; description: string; created_at: string; expires_at?: string }[];
@@ -239,6 +241,11 @@ export default function CustomersPage() {
                     <History size={14} />
                   </Button>
                 </td>
+                <td className="p-4 text-center">
+                  <Button variant="ghost" size="sm" onClick={() => setReceivableCustomer(c)} title={tCustomers('receivableLedger')}>
+                    <BookUser size={14} />
+                  </Button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -246,6 +253,11 @@ export default function CustomersPage() {
         {customers.length === 0 && <p className="text-center text-muted-foreground py-12">{tCustomers('empty')}</p>}
         {customers.length >= 200 && <p className="text-center text-xs text-gray-400 py-3">{tCustomers('first200')}</p>}
       </div>
+
+      {/* Receivable (neesie) Ledger Modal */}
+      {receivableCustomer && (
+        <ReceivableLedgerModal customer={receivableCustomer} onClose={() => setReceivableCustomer(null)} />
+      )}
 
       {/* Loyalty Ledger Modal */}
       {ledgerCustomer && (

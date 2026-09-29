@@ -203,7 +203,8 @@ type PosKey = keyof AppConfig['Messages']['pos'];
 const BUILT_IN_PAYMENT_KEYS = {
   cash: 'methodCash',
   card: 'methodCard',
-} as const satisfies Record<'cash' | 'card', PosKey>;
+  customer_account: 'methodCustomerAccount',
+} as const satisfies Record<'cash' | 'card' | 'customer_account', PosKey>;
 
 export default function DashboardPage() {
   const { currentTenant } = useAuthStore();

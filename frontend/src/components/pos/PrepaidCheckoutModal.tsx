@@ -67,7 +67,8 @@ const ORDER_TYPE_SUFFIX_KEYS = {
 const BUILT_IN_PAYMENT_KEYS = {
   cash: 'methodCash',
   card: 'methodCard',
-} as const satisfies Record<'cash' | 'card', PosKey>;
+  customer_account: 'methodCustomerAccount',
+} as const satisfies Record<'cash' | 'card' | 'customer_account', PosKey>;
 
 interface Payment {
   method: string;
