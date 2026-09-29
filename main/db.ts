@@ -5244,6 +5244,59 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
       `);
     },
   },
+  {
+    version: 94,
+    name: 'add_purchase_invoices',
+    up: () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS purchase_invoices (
+          id TEXT PRIMARY KEY,
+          invoice_number TEXT NOT NULL UNIQUE,
+          supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+          invoice_date TEXT NOT NULL,
+          due_date TEXT,
+          subtotal REAL NOT NULL DEFAULT 0,
+          discount_amount REAL NOT NULL DEFAULT 0,
+          tax_amount REAL NOT NULL DEFAULT 0,
+          total REAL NOT NULL DEFAULT 0,
+          paid_amount REAL NOT NULL DEFAULT 0,
+          balance REAL NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'draft'
+            CHECK (status IN ('draft', 'posted', 'partially_paid', 'paid', 'cancelled')),
+          notes TEXT,
+          created_by TEXT REFERENCES users(id),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_purchase_invoices_supplier ON purchase_invoices(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_invoices_status ON purchase_invoices(status);
+        CREATE INDEX IF NOT EXISTS idx_purchase_invoices_date ON purchase_invoices(invoice_date);
+        CREATE INDEX IF NOT EXISTS idx_purchase_invoices_number ON purchase_invoices(invoice_number);
+
+        CREATE TABLE IF NOT EXISTS purchase_invoice_items (
+          id TEXT PRIMARY KEY,
+          purchase_invoice_id TEXT NOT NULL REFERENCES purchase_invoices(id) ON DELETE CASCADE,
+          supply_id TEXT NOT NULL REFERENCES supplies(id),
+          quantity REAL NOT NULL CHECK (quantity > 0),
+          unit TEXT NOT NULL CHECK (unit IN ('each', 'g', 'kg', 'ml', 'l')),
+          unit_price REAL NOT NULL CHECK (unit_price >= 0),
+          discount_amount REAL NOT NULL DEFAULT 0 CHECK (discount_amount >= 0),
+          tax_amount REAL NOT NULL DEFAULT 0 CHECK (tax_amount >= 0),
+          total REAL NOT NULL CHECK (total >= 0),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_purchase_invoice_items_invoice ON purchase_invoice_items(purchase_invoice_id);
+        CREATE INDEX IF NOT EXISTS idx_purchase_invoice_items_supply ON purchase_invoice_items(supply_id);
+
+        CREATE TABLE IF NOT EXISTS purchase_invoice_sequences (
+          name TEXT NOT NULL,
+          date TEXT NOT NULL,
+          current_value INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (name, date)
+        );
+      `);
+    },
+  },
 ];
 
 function syncBackupBeforeMigration(fromVersion: number, toVersion: number): void {
@@ -6056,6 +6109,46 @@ export function generateShortId(table: string, length = 6): string {
  */
 export function nextZNumber(): number {
   return getNextSequence('z_report', 'ALL');
+}
+
+/**
+ * Monotonic per-day counter for purchase invoice numbers. Kept in its own
+ * `purchase_invoice_sequences` table so purchase numbering never collides
+ * with the sales-side `sequences` table.
+ */
+export function nextPurchaseInvoiceSequence(db: Database.Database, dateStamp: string): number {
+  return db.transaction(() => {
+    const updated = db.prepare(`
+      UPDATE purchase_invoice_sequences SET current_value = current_value + 1
+      WHERE name = ? AND date = ?
+    `).run('purchase_invoices', dateStamp);
+
+    if (updated.changes === 0) {
+      try {
+        db.prepare(`
+          INSERT INTO purchase_invoice_sequences (name, date, current_value) VALUES (?, ?, 1)
+        `).run('purchase_invoices', dateStamp);
+        return 1;
+      } catch (insertError) {
+        const retry = db.prepare(`
+          UPDATE purchase_invoice_sequences SET current_value = current_value + 1
+          WHERE name = ? AND date = ?
+        `).run('purchase_invoices', dateStamp);
+        if (retry.changes === 0) {
+          throw new Error('Failed to generate sequence for purchase_invoices', { cause: insertError });
+        }
+      }
+    }
+
+    const row = db.prepare('SELECT current_value FROM purchase_invoice_sequences WHERE name = ? AND date = ?')
+      .get('purchase_invoices', dateStamp) as { current_value: number } | undefined;
+    return row?.current_value ?? 0;
+  })();
+}
+
+/** Formats a purchase invoice number like `PINV-20260101-0001` for the given date. */
+export function formatPurchaseInvoiceNumber(dateStamp: string, sequence: number): string {
+  return `PINV-${dateStamp}-${String(sequence).padStart(4, '0')}`;
 }
 
 /** Atomically get the next sequence value for a given name and date. */
