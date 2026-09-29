@@ -24,6 +24,7 @@ export interface SupplyRecord {
   name: string;
   base_unit: SupplyUnit;
   stock_quantity: number;
+  cost_price?: number;
   low_stock_threshold: number | null;
   is_active: number;
   deleted_at: string | null;
@@ -222,18 +223,26 @@ export function applySupplyStockChange(
     quantityDelta: number;
     movementType: SupplyMovementType;
     unit?: string;
+    /** Purchase price per incoming unit; drives the weighted-average cost. */
+    unitCost?: number | null;
     reason?: string | null;
     actorUserId: string;
     referenceType?: string | null;
     referenceId?: string | number | null;
     createdAt?: string;
   },
-): { stockBefore: number; stockAfter: number; movementId: number } {
+): { stockBefore: number; stockAfter: number; costPrice: number; movementId: number } {
   const supply = db.prepare('SELECT * FROM supplies WHERE id = ?').get(options.supplyId) as
     | SupplyRecord
     | undefined;
   if (!supply) throw new SupplyServiceError(404, 'Supply not found');
   if (!options.actorUserId) throw new SupplyServiceError(400, 'actor_user_id is required');
+  if (options.unitCost !== undefined && options.unitCost !== null) {
+    const unitCost = typeof options.unitCost === 'string' ? Number(options.unitCost) : options.unitCost;
+    if (!Number.isFinite(unitCost) || unitCost < 0) {
+      throw new SupplyServiceError(400, 'unit_cost must be a non-negative finite number');
+    }
+  }
 
   const unit = options.unit === undefined ? supply.base_unit : assertSupplyUnit(options.unit, 'unit');
   const deltaInBase = convertQuantity(options.quantityDelta, unit, supply.base_unit);
@@ -245,8 +254,21 @@ export function applySupplyStockChange(
   const stockAfter = roundQuantity(stockBefore + deltaInBase);
   const timestamp = options.createdAt || now();
 
-  db.prepare('UPDATE supplies SET stock_quantity = ?, updated_at = ? WHERE id = ?')
-    .run(stockAfter, timestamp, options.supplyId);
+  // Weighted-average cost: positive inflows priced with unitCost blend into the
+  // on-hand value; outflows and unpriced inflows keep the current average.
+  let costPrice = Number(supply.cost_price ?? 0);
+  if (!Number.isFinite(costPrice) || costPrice < 0) costPrice = 0;
+  const pricedInflow = options.unitCost !== undefined && options.unitCost !== null
+    && Number.isFinite(Number(options.unitCost)) && Number(options.unitCost) > 0;
+  if (pricedInflow && deltaInBase > 0 && stockBefore >= 0 && stockAfter > 0) {
+    const unitCostInBase = Number(options.unitCost) / convertQuantity(1, unit, supply.base_unit);
+    const incomingValue = roundQuantity(unitCostInBase * deltaInBase);
+    const onHandValue = roundQuantity(costPrice * Math.max(stockBefore, 0));
+    costPrice = roundQuantity((onHandValue + incomingValue) / stockAfter);
+  }
+
+  db.prepare('UPDATE supplies SET stock_quantity = ?, cost_price = ?, updated_at = ? WHERE id = ?')
+    .run(stockAfter, costPrice, timestamp, options.supplyId);
 
   const movement = db.prepare(`
     INSERT INTO supply_movements (
@@ -266,7 +288,7 @@ export function applySupplyStockChange(
     timestamp,
   );
 
-  return { stockBefore, stockAfter, movementId: Number(movement.lastInsertRowid) };
+  return { stockBefore, stockAfter, costPrice, movementId: Number(movement.lastInsertRowid) };
 }
 
 function recordSupplyMovementInTxn(db: ReturnType<typeof getDatabase>, input: RecordMovementInput): SupplyMovement | null {

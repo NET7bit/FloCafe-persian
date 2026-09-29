@@ -5377,6 +5377,44 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
       `);
     },
   },
+  {
+    version: 97,
+    name: 'add_supply_cost_price',
+    up: () => {
+      // Guarded like v2/v20: re-runs over an upgraded database must not fail or
+      // clobber a maintained average.
+      if (getColumns(db, 'supplies').includes('cost_price')) return;
+      db.exec(`ALTER TABLE supplies ADD COLUMN cost_price REAL NOT NULL DEFAULT 0`);
+      // One-time weighted-average backfill from posted purchase history:
+      // value per base unit = SUM(unit_price * quantity) / SUM(quantity converted
+      // to the supply's base unit). Items whose unit cannot convert into the
+      // supply's base unit are skipped.
+      db.exec(`
+        UPDATE supplies SET cost_price = COALESCE((
+          SELECT ROUND(SUM(total_value) / NULLIF(SUM(base_quantity), 0), 8)
+          FROM (
+            SELECT
+              pii.unit_price * pii.quantity AS total_value,
+              pii.quantity * CASE
+                WHEN pii.unit = supplies.base_unit THEN 1.0
+                WHEN pii.unit IN ('kg', 'g') AND supplies.base_unit IN ('kg', 'g') THEN
+                  (CASE pii.unit WHEN 'kg' THEN 1000.0 ELSE 1.0 END) /
+                  (CASE supplies.base_unit WHEN 'kg' THEN 1000.0 ELSE 1.0 END)
+                WHEN pii.unit IN ('l', 'ml') AND supplies.base_unit IN ('l', 'ml') THEN
+                  (CASE pii.unit WHEN 'l' THEN 1000.0 ELSE 1.0 END) /
+                  (CASE supplies.base_unit WHEN 'l' THEN 1000.0 ELSE 1.0 END)
+                ELSE NULL
+              END AS base_quantity
+            FROM purchase_invoice_items pii
+            JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
+            WHERE pii.supply_id = supplies.id
+              AND pi.status IN ('posted', 'partially_paid', 'paid')
+          )
+          WHERE base_quantity IS NOT NULL
+        ), cost_price)
+      `);
+    },
+  },
 ];
 
 function syncBackupBeforeMigration(fromVersion: number, toVersion: number): void {

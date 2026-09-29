@@ -350,6 +350,7 @@ export function postPurchaseInvoice(
         quantityDelta: item.quantity,
         movementType: 'receive',
         unit: item.unit,
+        unitCost: item.unit_price,
         reason: `Purchase invoice ${invoice.invoice_number}`,
         actorUserId,
         referenceType: 'purchase_invoice',
