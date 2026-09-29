@@ -186,6 +186,22 @@ async function main() {
 
   expectServiceError(() => getPurchaseReturn(db, 'missing'), 404, 'missing return is a 404');
 
+  // ── Cursor pagination with tied timestamps ──
+  // Tie every return's created_at so a created_at-only cursor would drop rows
+  // after the first page.
+  const allReturns = listPurchaseReturns(db, {}).returns.length;
+  assert(allReturns >= 3, 'enough returns exist for the pagination walk');
+  db.prepare("UPDATE purchase_returns SET created_at = '2026-03-05 09:00:00'").run();
+  const seenReturnIds: string[] = [];
+  let returnCursor: string | null = null;
+  do {
+    const page = listPurchaseReturns(db, { perPage: 2, beforeId: returnCursor ?? undefined });
+    seenReturnIds.push(...page.returns.map((r: any) => r.id));
+    returnCursor = page.nextCursor;
+  } while (returnCursor !== null);
+  assertEqual(seenReturnIds.length, allReturns, 'pagination visits every return despite tied timestamps');
+  assertEqual(new Set(seenReturnIds).size, allReturns, 'return pagination never repeats a row');
+
   console.log('='.repeat(50));
   const { passed, failed, total } = getResults();
   console.log(`${passed}/${total} passed, ${failed} failed`);

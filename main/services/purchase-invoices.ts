@@ -240,7 +240,9 @@ export function listPurchaseInvoices(
     params.push(term, term);
   }
   if (filters.beforeId !== undefined) {
-    conditions.push('i.created_at < (SELECT created_at FROM purchase_invoices WHERE id = ?)');
+    // Keyset cursor aligned with ORDER BY created_at DESC, id DESC so rows
+    // sharing a timestamp are not skipped between pages.
+    conditions.push('(i.created_at, i.id) < (SELECT created_at, id FROM purchase_invoices WHERE id = ?)');
     params.push(filters.beforeId);
   }
   const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

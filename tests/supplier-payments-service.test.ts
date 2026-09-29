@@ -153,6 +153,22 @@ async function main() {
   const onAccountList = listSupplierPayments(db, { search: 'Supplier A' });
   assert(onAccountList.payments.length >= 2, 'search matches supplier name');
 
+  // ── Cursor pagination with tied timestamps ──
+  // The cursor must follow (paid_at, id) — a created_at-only cursor would
+  // drop rows that share the ordering key.
+  const allPayments = listSupplierPayments(db, {}).payments.length;
+  assert(allPayments >= 2, 'enough payments exist for the pagination walk');
+  db.prepare("UPDATE supplier_payments SET paid_at = '2026-03-05 09:00:00'").run();
+  const seenPaymentIds: string[] = [];
+  let paymentCursor: string | null = null;
+  do {
+    const page = listSupplierPayments(db, { perPage: 2, beforeId: paymentCursor ?? undefined });
+    seenPaymentIds.push(...page.payments.map((p: any) => p.id));
+    paymentCursor = page.nextCursor;
+  } while (paymentCursor !== null);
+  assertEqual(seenPaymentIds.length, allPayments, 'pagination visits every payment despite tied paid_at');
+  assertEqual(new Set(seenPaymentIds).size, allPayments, 'payment pagination never repeats a row');
+
   console.log('='.repeat(50));
   const { passed, failed, total } = getResults();
   console.log(`${passed}/${total} passed, ${failed} failed`);

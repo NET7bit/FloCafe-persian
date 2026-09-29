@@ -143,7 +143,9 @@ export function listSupplierPayments(
     params.push(term, term, term);
   }
   if (filters.beforeId !== undefined) {
-    conditions.push('p.created_at < (SELECT created_at FROM supplier_payments WHERE id = ?)');
+    // Keyset cursor aligned with ORDER BY paid_at DESC, id DESC so rows
+    // sharing a paid_at second are not skipped between pages.
+    conditions.push('(p.paid_at, p.id) < (SELECT paid_at, id FROM supplier_payments WHERE id = ?)');
     params.push(filters.beforeId);
   }
   const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

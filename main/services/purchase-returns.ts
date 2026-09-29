@@ -205,7 +205,9 @@ export function listPurchaseReturns(
     params.push(term, term);
   }
   if (filters.beforeId !== undefined) {
-    conditions.push('r.created_at < (SELECT created_at FROM purchase_returns WHERE id = ?)');
+    // Keyset cursor aligned with ORDER BY created_at DESC, id DESC so rows
+    // sharing a timestamp are not skipped between pages.
+    conditions.push('(r.created_at, r.id) < (SELECT created_at, id FROM purchase_returns WHERE id = ?)');
     params.push(filters.beforeId);
   }
   const whereSql = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

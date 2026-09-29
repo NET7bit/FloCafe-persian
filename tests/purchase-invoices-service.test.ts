@@ -177,6 +177,22 @@ async function main() {
 
   expectServiceError(() => getPurchaseInvoice(db, 'missing'), 404, 'missing invoice is 404');
 
+  // ── Cursor pagination with tied timestamps ──
+  // Give every invoice the same created_at so a cursor that only compares
+  // created_at would drop every row after the first page.
+  const allInvoices = listPurchaseInvoices(db, {}).invoices.length;
+  assert(allInvoices >= 5, 'enough invoices exist for the pagination walk');
+  db.prepare("UPDATE purchase_invoices SET created_at = '2026-03-05 09:00:00'").run();
+  const seenInvoiceIds: string[] = [];
+  let invoiceCursor: string | null = null;
+  do {
+    const page = listPurchaseInvoices(db, { perPage: 2, beforeId: invoiceCursor ?? undefined });
+    seenInvoiceIds.push(...page.invoices.map((i: any) => i.id));
+    invoiceCursor = page.nextCursor;
+  } while (invoiceCursor !== null);
+  assertEqual(seenInvoiceIds.length, allInvoices, 'pagination visits every invoice despite tied timestamps');
+  assertEqual(new Set(seenInvoiceIds).size, allInvoices, 'invoice pagination never repeats a row');
+
   console.log('='.repeat(50));
   const { passed, failed, total } = getResults();
   console.log(`${passed}/${total} passed, ${failed} failed`);
