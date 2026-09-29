@@ -5297,6 +5297,30 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
       `);
     },
   },
+  {
+    version: 95,
+    name: 'add_supplier_payments',
+    up: () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS supplier_payments (
+          id TEXT PRIMARY KEY,
+          supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+          purchase_invoice_id TEXT REFERENCES purchase_invoices(id),
+          amount REAL NOT NULL CHECK (amount > 0),
+          payment_method TEXT NOT NULL,
+          reference TEXT,
+          paid_at TEXT NOT NULL,
+          created_by TEXT REFERENCES users(id),
+          notes TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_supplier_payments_supplier ON supplier_payments(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_supplier_payments_invoice ON supplier_payments(purchase_invoice_id);
+        CREATE INDEX IF NOT EXISTS idx_supplier_payments_paid_at ON supplier_payments(paid_at);
+        CREATE INDEX IF NOT EXISTS idx_supplier_payments_method ON supplier_payments(payment_method);
+      `);
+    },
+  },
 ];
 
 function syncBackupBeforeMigration(fromVersion: number, toVersion: number): void {
