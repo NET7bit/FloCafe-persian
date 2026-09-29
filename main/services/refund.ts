@@ -7,6 +7,7 @@ import { invertTaxBreakdown, invertTaxSnapshot } from './tax';
 import { getOpenSession, NO_CASH_SESSION_ID, requireOpenSessionForCashTender } from './shift-session-gate';
 import { ROLE_ACCESS } from '../../shared/role-permissions';
 import { getCurrencyMinorUnitFactor, resolveRegionalSnapshot, resolveTenantCurrency } from '../countries';
+import { createReceivableEntry } from './receivables';
 
 type Database = ReturnType<typeof getDatabase>;
 
@@ -170,6 +171,10 @@ export function createRefund(db: Database, req: RefundRequest): RefundResult {
     if (!loyaltyEnabled) throw httpError('Store credit is not enabled', 400);
     if (!bill.customer_id) throw httpError('Customer association is required for a store-credit refund', 400);
   }
+  const isCustomerAccountRefund = req.method === 'customer_account';
+  if (isCustomerAccountRefund && !bill.customer_id) {
+    throw httpError('Customer association is required for a customer-account refund', 400);
+  }
 
   const { paidCents, refundedCents, refundableCents } = getRefundableBalance(db, req.billId, currency);
   if (refundableCents <= 0) throw httpError('Bill has nothing left to refund', 400);
@@ -227,6 +232,20 @@ export function createRefund(db: Database, req: RefundRequest): RefundResult {
       INSERT INTO loyalty_ledger (customer_id, bill_id, type, amount, description, created_at, updated_at)
       VALUES (?, ?, 'credit', ?, ?, ?, ?)
     `).run(bill.customer_id, req.billId, creditAmount, `Refund credit for bill ${bill.bill_number}`, timestamp, timestamp);
+  }
+  if (isCustomerAccountRefund) {
+    // Credit the receivable ledger: the refund reduces what the customer owes
+    // instead of returning cash to the drawer.
+    createReceivableEntry(db, {
+      customerId: bill.customer_id,
+      entryType: 'adjustment',
+      direction: 'credit',
+      amount: amountCents / minorFactor,
+      description: `Refund of bill ${bill.bill_number}`,
+      reference: String(req.billId),
+      entryDate: timestamp.slice(0, 10),
+      actorUserId: req.createdByUserId,
+    });
   }
 
   recordOrderAudit(db, {

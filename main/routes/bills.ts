@@ -28,6 +28,7 @@ import {
 } from '../services/tax';
 import { applyPayableRounding } from '../services/tax-engine';
 import { calculateOrderTotals } from '../services/orders';
+import { createReceivableEntry } from '../services/receivables';
 import { sendEvent } from '../services/telemetry';
 import {
   getCurrencyFractionDigits,
@@ -1668,7 +1669,7 @@ interface PaymentInput {
 
 // A payment request is prepared and fully validated before any ledger or bill
 // writes. Both endpoints use this one atomic path.
-const PAYMENT_METHODS = new Set(['cash', 'card', 'wallet']);
+const PAYMENT_METHODS = new Set(['cash', 'card', 'wallet', 'customer_account']);
 const MAX_PAYMENT_LINES = 100;
 const MAX_PAYMENT_METADATA_BYTES = 8192;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
@@ -1823,6 +1824,10 @@ function preparePaymentBatch(
   const effectiveCustomerId = associatedCustomerId ? String(associatedCustomerId) : requestedCustomerId;
   if (effectiveCustomerId && !db.prepare('SELECT id FROM customers WHERE id = ?').get(effectiveCustomerId)) {
     throw Object.assign(new Error('Customer not found'), { statusCode: 400 });
+  }
+  const usesCustomerAccount = resolvedPayments.some((payment) => payment.method === 'customer_account');
+  if (usesCustomerAccount && !effectiveCustomerId) {
+    throw Object.assign(new Error('Customer account payment requires a customer associated with the bill'), { statusCode: 400 });
   }
   const existingTransactionKeys = new Set(existingPayments.map(paymentTransactionKey).filter(Boolean));
   const existingTransactionPayments = new Map<string, any>();
@@ -2015,6 +2020,20 @@ function applyPaymentBatch(
   }
   if (!bill.customer_id && effectiveCustomerId) db.prepare('UPDATE bills SET customer_id = ?, updated_at = ? WHERE id = ?').run(effectiveCustomerId, changedAt, billId);
   db.prepare(`UPDATE bills SET paid_amount = ?, balance = ?, payment_status = ?, payment_details = ?, paid_at = CASE WHEN ? = 'paid' THEN ? ELSE paid_at END, updated_at = ? WHERE id = ?`).run(newPaidCents / minorFactor, newBalanceCents / minorFactor, paymentStatus, JSON.stringify(allPayments), paymentStatus, paymentStatus === 'paid' ? changedAt : null, changedAt, billId);
+  // Neesie: customer_account lines move the amount onto the customer's
+  // receivable ledger instead of the drawer. Same txn as the bill write.
+  for (const line of prepared) {
+    if (line.payment.method !== 'customer_account' || line.amountCents <= 0) continue;
+    createReceivableEntry(db, {
+      customerId: effectiveCustomerId as string,
+      entryType: 'charge',
+      amount: line.amountCents / minorFactor,
+      description: `Bill ${bill.bill_number}`,
+      reference: String(bill.id),
+      entryDate: changedAt.slice(0, 10),
+      actorUserId: idempotencyUserId || '',
+    });
+  }
   let loyaltyPointsEarned = 0;
   if (paymentStatus === 'paid') {
     const unpaidSibling = db.prepare(`SELECT 1 FROM bills WHERE order_id = ? AND id != ? AND payment_status NOT IN ('paid', 'refunded', 'partially_refunded') LIMIT 1`).get(bill.order_id, bill.id);
