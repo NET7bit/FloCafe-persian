@@ -5415,6 +5415,29 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
       `);
     },
   },
+  {
+    version: 98,
+    name: 'add_expenses',
+    up: () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS expenses (
+          id TEXT PRIMARY KEY,
+          category TEXT NOT NULL,
+          description TEXT,
+          amount REAL NOT NULL CHECK (amount > 0),
+          payment_method TEXT NOT NULL,
+          expense_date TEXT NOT NULL,
+          created_by TEXT REFERENCES users(id),
+          notes TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
+        CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category);
+        CREATE INDEX IF NOT EXISTS idx_expenses_method ON expenses(payment_method);
+        CREATE INDEX IF NOT EXISTS idx_expenses_created_by ON expenses(created_by);
+      `);
+    },
+  },
 ];
 
 function syncBackupBeforeMigration(fromVersion: number, toVersion: number): void {
