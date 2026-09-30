@@ -361,7 +361,7 @@ export default function RefundModal({ order, bills, onClose, onRefunded }: Props
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
             >
               {PAYMENT_METHODS.map((m) => (
-                <option key={m.key} value={m.key}>{tPos(BUILT_IN_PAYMENT_KEYS[m.key])}</option>
+                <option key={m.key} value={m.key} disabled={m.key === 'customer_account' && !effectiveBill?.customer_id}>{tPos(BUILT_IN_PAYMENT_KEYS[m.key])}</option>
               ))}
               {customMethods.filter((m) => m.is_active).map((m) => (
                 <option key={m.id} value={m.name}>{m.name}</option>

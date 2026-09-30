@@ -42,6 +42,9 @@ export default function CustomersPage() {
   const filter = searchParams.get('filter');
   
   const [customers, setCustomers] = useState<Customer[]>([]);
+  // Receivable balances come precomputed from GET /receivables/balances —
+  // balances are never derived in the client.
+  const [receivableBalances, setReceivableBalances] = useState<Record<string, number>>({});
   const [, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [search, setSearch] = useState('');
@@ -90,6 +93,12 @@ export default function CustomersPage() {
         if (!(err instanceof Error && (err.name === 'CanceledError' || err.name === 'AbortError'))) toast.error(tCustomer('loadFailed'));
       })
       .finally(() => { setLoading(false); });
+    api.get('/receivables/balances', { signal: controller.signal })
+      .then(({ data }) => setReceivableBalances(Object.fromEntries((data.balances || []).map((row: { customer_id: string; balance: number }) => [String(row.customer_id), row.balance]))))
+      .catch((err: unknown) => {
+        // Roles without receivables access simply show no balance column values.
+        if (!(err instanceof Error && (err.name === 'CanceledError' || err.name === 'AbortError'))) setReceivableBalances({});
+      });
     }, 250);
     return () => { clearTimeout(timer); controller.abort(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -193,6 +202,7 @@ export default function CustomersPage() {
               <th className="text-end p-4 text-xs font-medium text-muted-foreground uppercase cursor-pointer hover:bg-muted group transition-colors" onClick={() => onSort('loyalty')}>
                 {tCustomer('loyalty')} <SortIcon field="loyalty" sortField={sortField} sortOrder={sortOrder} />
               </th>
+              <th className="text-end p-4 text-xs font-medium text-muted-foreground uppercase">{tCustomers('columnBalance')}</th>
               <th className="text-center p-4 text-xs font-medium text-muted-foreground uppercase">{tCustomers('columnActions')}</th>
               <th className="text-center p-4 text-xs font-medium text-muted-foreground uppercase">{tCustomers('columnLedger')}</th>
             </tr>
@@ -231,6 +241,15 @@ export default function CustomersPage() {
                     <span className="text-gray-400 text-sm">—</span>
                   )}
                 </td>
+                <td className="p-4 text-end">
+                  {(() => {
+                    const balance = receivableBalances[String(c.id)];
+                    if (balance === undefined) return <span className="text-gray-400 text-sm">—</span>;
+                    if (balance > 0) return <span className="text-red-600 font-semibold text-sm">{fmt(balance)}</span>;
+                    if (balance < 0) return <span className="text-green-600 font-semibold text-sm">{fmt(balance)}</span>; // negative = prepaid (credit)
+                    return <span className="text-muted-foreground text-sm">{fmt(0)}</span>;
+                  })()}
+                </td>
                 <td className="p-4 text-center">
                   <Button variant="ghost" size="sm" onClick={() => openEdit(c)}>
                     <Edit size={14} />
@@ -256,7 +275,7 @@ export default function CustomersPage() {
 
       {/* Receivable (neesie) Ledger Modal */}
       {receivableCustomer && (
-        <ReceivableLedgerModal customer={receivableCustomer} onClose={() => setReceivableCustomer(null)} />
+        <ReceivableLedgerModal customer={receivableCustomer} onClose={() => { setReceivableCustomer(null); setRefreshKey((key) => key + 1); }} />
       )}
 
       {/* Loyalty Ledger Modal */}

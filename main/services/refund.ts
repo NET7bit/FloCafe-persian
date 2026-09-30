@@ -172,7 +172,11 @@ export function createRefund(db: Database, req: RefundRequest): RefundResult {
     if (!bill.customer_id) throw httpError('Customer association is required for a store-credit refund', 400);
   }
   const isCustomerAccountRefund = req.method === 'customer_account';
-  if (isCustomerAccountRefund && !bill.customer_id) {
+  // Split-check children inherit the order's customer at payment time, so a
+  // neesie refund must resolve the same effective customer before crediting.
+  const effectiveCustomerId = bill.customer_id
+    || ((db.prepare('SELECT customer_id FROM orders WHERE id = ?').get(bill.order_id) as { customer_id?: string } | undefined)?.customer_id ?? null);
+  if (isCustomerAccountRefund && !effectiveCustomerId) {
     throw httpError('Customer association is required for a customer-account refund', 400);
   }
 
@@ -237,7 +241,7 @@ export function createRefund(db: Database, req: RefundRequest): RefundResult {
     // Credit the receivable ledger: the refund reduces what the customer owes
     // instead of returning cash to the drawer.
     createReceivableEntry(db, {
-      customerId: bill.customer_id,
+      customerId: effectiveCustomerId,
       entryType: 'adjustment',
       direction: 'credit',
       amount: amountCents / minorFactor,

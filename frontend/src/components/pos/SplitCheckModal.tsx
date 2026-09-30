@@ -23,8 +23,9 @@ export function SplitCheckModal({ bill, order, onClose, onSplit }: { bill: Bill;
     return [item.id, slots];
   })));
   const [saving, setSaving] = useState(false);
-  // Per-check customer-account (neesie) toggle: charged to the order customer's
-  // account after the split; the payment endpoint derives that customer from the order.
+  // Per-check customer-account (neesie) toggle. v99 constraint: every neesie
+  // check is charged to the ORDER's single customer (inherited by each split
+  // bill at payment time); per-check customers are out of scope.
   const [neesieChecks, setNeesieChecks] = useState<Set<number>>(new Set());
 
   const resize = (next: number) => {
@@ -55,10 +56,10 @@ export function SplitCheckModal({ bill, order, onClose, onSplit }: { bill: Bill;
   const submit = async () => {
     const invalid = items.some((item) => (allocations[item.id] || []).reduce((sum, value) => sum + value, 0) !== item.quantity)
       || Array.from({ length: count }, (_, check) => items.every((item) => !(allocations[item.id]?.[check] > 0))).some(Boolean);
+    if (invalid) return toast.error(t('allocateAllItems'));
     if (neesieChecks.size > 0 && !order.customer_id) {
       return toast.error(t('customerRequiredForAccount'));
     }
-    if (invalid) return toast.error(t('allocateAllItems'));
     setSaving(true);
     try {
       const checks = Array.from({ length: count }, (_, checkIndex) => ({
@@ -94,8 +95,14 @@ export function SplitCheckModal({ bill, order, onClose, onSplit }: { bill: Bill;
     <div className="overflow-auto p-5"><table className="w-full text-sm"><thead><tr><th className="text-start p-2 sticky start-0 bg-card">{t('items')}</th>{Array.from({ length: count }, (_, i) => <th key={i} className="p-2 min-w-28"><input value={labels[i]} onChange={(e) => setLabels((old) => old.map((label, n) => n === i ? e.target.value.slice(0, 40) : label))} className="w-full text-center border rounded px-2 py-1" /></th>)}</tr></thead><tbody>{items.map((item: OrderItem) => <tr key={item.id} className="border-t"><td className="p-2 sticky start-0 bg-card"><div className="font-medium">{item.product_name}</div><div className="text-xs text-muted-foreground">{item.quantity} × {fmt(Number(item.total) / item.quantity)}</div></td>{Array.from({ length: count }, (_, i) => <td key={i} className="p-2"><input type="number" min="0" max={item.quantity} value={allocations[item.id]?.[i] || 0} onChange={(e) => { const value = Math.min(item.quantity, Math.max(0, Number(e.target.value) || 0)); setAllocations((old) => ({ ...old, [item.id]: old[item.id].map((qty, n) => n === i ? value : qty) })); }} className="w-full text-center border rounded px-2 py-1" /></td>)}</tr>)}</tbody><tfoot><tr className="border-t font-semibold"><td className="p-2">{t('estimatedItemsTotal')}</td>{totals.map((total, i) => <td key={i} className="p-2 text-center">{fmt(total)}</td>)}</tr></tfoot></table></div>
     <div className="px-5 py-3 border-t flex items-center justify-between gap-3">
       <div className="min-w-0">
-        <p className="text-xs font-semibold text-foreground">{t('neesieChecksTitle')}</p>
-        <p className="text-[11px] text-muted-foreground truncate">{t('neesieChecksHint')}</p>
+        {neesieChecks.size > 0 ? (
+          <p className="text-xs font-semibold text-brand">{t('neesieChecksCount', { count: neesieChecks.size })}</p>
+        ) : (
+          <>
+            <p className="text-xs font-semibold text-foreground">{t('neesieChecksTitle')}</p>
+            <p className="text-[11px] text-muted-foreground truncate">{t('neesieChecksHint')}</p>
+          </>
+        )}
       </div>
       <div className="flex flex-wrap gap-1.5 justify-end">
         {Array.from({ length: count }, (_, check) => (
