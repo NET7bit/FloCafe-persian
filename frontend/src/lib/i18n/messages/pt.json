@@ -816,6 +816,8 @@
     "splitCheck": "Dividir conta",
     "splitCheckFailed": "Não foi possível dividir a conta",
     "splitCheckHint": "Divida itens ou quantidades em contas separadas. Os pagamentos continuam sendo registrados manualmente.",
+    "neesieChecksTitle": "Cobrar na conta do cliente",
+    "neesieChecksHint": "Toque nos convidados para mover a conta deles para a conta do cliente em vez de cobrar agora.",
     "splitPayment": "Pagamento Dividido",
     "subtotal": "Subtotal",
     "supportRequestQueueFailed": "Não foi possível enfileirar a solicitação de suporte",

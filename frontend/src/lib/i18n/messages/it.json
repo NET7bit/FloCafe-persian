@@ -816,6 +816,8 @@
     "splitCheck": "Dividi conto",
     "splitCheckFailed": "Impossibile dividere il conto",
     "splitCheckHint": "Dividi gli articoli o le quantità in conti separati. I pagamenti vengono ancora registrati manualmente.",
+    "neesieChecksTitle": "Addebita sul conto cliente",
+    "neesieChecksHint": "Tocca gli ospiti per spostare il loro conto sul conto cliente invece di incassare ora.",
     "splitPayment": "Dividi pagamento",
     "subtotal": "Subtotale",
     "supportRequestQueueFailed": "Impossibile mettere in coda la richiesta di assistenza",

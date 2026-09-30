@@ -816,6 +816,8 @@
     "splitCheck": "拆分账单",
     "splitCheckFailed": "无法拆分账单",
     "splitCheckHint": "将商品或数量拆分到不同账单。付款仍需手动记录。",
+    "neesieChecksTitle": "记入客户挂账",
+    "neesieChecksHint": "点选客人将其账单转入客户挂账，而不是现在收款。",
     "splitPayment": "拆分支付",
     "subtotal": "小计",
     "supportRequestQueueFailed": "无法加入支持请求队列",

@@ -816,6 +816,8 @@
     "splitCheck": "Pisah tagihan",
     "splitCheckFailed": "Tidak dapat membagi tagihan",
     "splitCheckHint": "Bagi item atau jumlah ke dalam tagihan terpisah. Pembayaran tetap dicatat secara manual.",
+    "neesieChecksTitle": "Debitkan ke akun pelanggan",
+    "neesieChecksHint": "Ketuk tamu untuk memindahkan tagihan mereka ke akun pelanggan alih-alih menagih sekarang.",
     "splitPayment": "Pisah Pembayaran",
     "subtotal": "Subtotal",
     "supportRequestQueueFailed": "Tidak dapat mengantrekan permintaan dukungan",

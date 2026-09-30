@@ -101,6 +101,8 @@ interface OrderCardProps {
   linkCustomerResults?: Customer[];
   linkingCustomer?: boolean;
   onCheckout: (orderId: number) => void;
+  /** Pay a specific (split-check) bill via the payment modal. */
+  onPayBill?: (bill: Bill) => void;
   onAddItems: (order: Order) => void;
   onRefund: (order: Order, bills: Bill[]) => void;
   onConvertToTakeaway: (order: Order) => void;
@@ -135,6 +137,7 @@ export function OrderCard({
   linkCustomerResults,
   linkingCustomer,
   onCheckout,
+  onPayBill,
   onAddItems,
   onRefund,
   onConvertToTakeaway,
@@ -210,6 +213,7 @@ export function OrderCard({
     return [];
   })();
   const paidBills = orderBills.filter((b) => Number(b.paid_amount) > 0 && b.payment_status !== 'refunded');
+  const splitChecks = orderBills.filter((b) => Boolean(b.split_group_id));
   const hasEligibleRefund = paidBills.length > 0;
 
   const checkoutButtonLabel = (() => {
@@ -819,6 +823,27 @@ export function OrderCard({
           </div>
         ) : (
           <div className="flex items-center gap-2">
+            {splitChecks.length > 0 && onPayBill && (
+              <div className="space-y-1.5">
+                {splitChecks.map((check) => {
+                  const checkPaid = check.payment_status === 'paid';
+                  return (
+                    <div key={check.id} className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-1.5">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-medium text-foreground">{check.split_label}</p>
+                        <p className="text-[11px] text-muted-foreground">{fmt(Number(check.total))} · {check.payment_status}</p>
+                      </div>
+                      {!checkPaid && (
+                        <Button size="sm" variant="outline" onClick={() => onPayBill(check)}>
+                          <CreditCard size={12} className="me-1" />
+                          {tOrders('takePayment')}
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             <Button
               onClick={() => onCheckout(order.id)}
               disabled={generatingBillId === order.id}

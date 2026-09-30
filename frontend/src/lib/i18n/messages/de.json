@@ -816,6 +816,8 @@
     "splitCheck": "Rechnung teilen",
     "splitCheckFailed": "Rechnung konnte nicht geteilt werden",
     "splitCheckHint": "Teilen Sie Artikel oder Mengen auf separate Rechnungen auf. Zahlungen werden weiterhin manuell erfasst.",
+    "neesieChecksTitle": "Auf Kundenkonto buchen",
+    "neesieChecksHint": "Tippe Gäste an, um ihre Rechnung statt jetzt einzuziehen aufs Kundenkonto zu buchen.",
     "splitPayment": "Zahlung aufteilen",
     "subtotal": "Zwischensumme",
     "supportRequestQueueFailed": "Supportanfrage konnte nicht in die Warteschlange eingereiht werden",

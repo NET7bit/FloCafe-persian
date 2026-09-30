@@ -816,6 +816,8 @@
     "splitCheck": "Split check",
     "splitCheckFailed": "Could not split the check",
     "splitCheckHint": "Divide items or quantities into separate bills. Payments are still recorded manually.",
+    "neesieChecksTitle": "Charge to customer account",
+    "neesieChecksHint": "Tap guests to move their check onto the customer account instead of collecting payment now.",
     "splitPayment": "Split Payment",
     "subtotal": "Subtotal",
     "supportRequestQueueFailed": "Could not queue the support request",

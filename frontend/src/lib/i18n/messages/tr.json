@@ -816,6 +816,8 @@
     "splitCheck": "Hesabı Böl",
     "splitCheckFailed": "Hesap bölünemedi",
     "splitCheckHint": "Ürün veya miktarları ayrı fişlere bölün. Ödemeler yine manuel kaydedilir.",
+    "neesieChecksTitle": "Müşteri hesabına yükle",
+    "neesieChecksHint": "Ödeme almak yerine hesapları müşteri hesabına aktarmak için misafirlere dokunun.",
     "splitPayment": "Parçalı Ödeme",
     "subtotal": "Ara Toplam",
     "supportRequestQueueFailed": "Destek talebi kuyruğa alınamadı",

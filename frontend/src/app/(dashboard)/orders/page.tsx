@@ -493,6 +493,8 @@ export default function OrdersPage() {
     }
   };
 
+  const handlePayBill = (bill: Bill) => setPaymentBill(bill);
+
   const handlePaymentComplete = async () => {
     const bill = paymentBill; // capture before clearing state
     setPaymentBill(null);
@@ -1029,6 +1031,7 @@ export default function OrdersPage() {
               linkCustomerResults={linkCustomerResults}
               linkingCustomer={linkingCustomer}
               onCheckout={handleCheckout}
+              onPayBill={handlePayBill}
               onAddItems={openAddItemsModal}
               onRefund={(ord, bills) => setRefundModal({ order: ord, bills })}
               onConvertToTakeaway={handleConvertToTakeaway}

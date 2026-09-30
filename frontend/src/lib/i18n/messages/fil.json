@@ -816,6 +816,8 @@
     "splitCheck": "I-split ang check",
     "splitCheckFailed": "Hindi ma-split ang check",
     "splitCheckHint": "Divide items or quantities into separate bills. Mga Pagbabayad are still recorded manually.",
+    "neesieChecksTitle": "Singilin sa customer account",
+    "neesieChecksHint": "I-tap ang mga guest para ilipat ang kanilang bill sa customer account sa halip na maningil ngayon.",
     "splitPayment": "Split Bayad",
     "subtotal": "Subtotal",
     "supportRequestQueueFailed": "Hindi ma-queue ang kahilingan sa suporta",

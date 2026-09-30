@@ -816,6 +816,8 @@
     "splitCheck": "Diviser l’addition",
     "splitCheckFailed": "Impossible de diviser l’addition",
     "splitCheckHint": "Répartissez les articles ou les quantités sur plusieurs factures. Les paiements restent enregistrés manuellement.",
+    "neesieChecksTitle": "Débiter le compte client",
+    "neesieChecksHint": "Touchez les convives pour passer leur addition sur le compte client au lieu d’encaisser maintenant.",
     "splitPayment": "Paiement partagé",
     "subtotal": "Sous-total",
     "supportRequestQueueFailed": "Impossible de mettre la demande d’assistance en file d’attente",

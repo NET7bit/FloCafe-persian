@@ -816,6 +816,8 @@
     "splitCheck": "分割会計",
     "splitCheckFailed": "会計を分割できませんでした",
     "splitCheckHint": "商品または数量を別々の請求書に分けます。支払いは引き続き手動で記録します。",
+    "neesieChecksTitle": "売掛けに計上",
+    "neesieChecksHint": "支払いを収める代わりに、タップしたゲストの伝票を売掛けに計上します。",
     "splitPayment": "支払いを分割",
     "subtotal": "小計",
     "supportRequestQueueFailed": "サポートリクエストをキューに追加できませんでした",

@@ -816,6 +816,8 @@
     "splitCheck": "청구서 분할",
     "splitCheckFailed": "청구서를 분할하지 못했습니다",
     "splitCheckHint": "항목이나 수량을 별도 청구서로 나눕니다. 결제는 여전히 수동으로 기록됩니다.",
+    "neesieChecksTitle": "외상 계정에 기록",
+    "neesieChecksHint": "지금 결제하는 대신 탭한 손님의 계산서를 외상 계정에 넘깁니다.",
     "splitPayment": "결제 분할",
     "subtotal": "소계",
     "supportRequestQueueFailed": "지원 요청을 대기열에 추가하지 못했습니다",

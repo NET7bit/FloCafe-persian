@@ -23,6 +23,9 @@ export function SplitCheckModal({ bill, order, onClose, onSplit }: { bill: Bill;
     return [item.id, slots];
   })));
   const [saving, setSaving] = useState(false);
+  // Per-check customer-account (neesie) toggle: charged to the order customer's
+  // account after the split; the payment endpoint derives that customer from the order.
+  const [neesieChecks, setNeesieChecks] = useState<Set<number>>(new Set());
 
   const resize = (next: number) => {
     next = Math.min(20, Math.max(2, next));
@@ -34,14 +37,27 @@ export function SplitCheckModal({ bill, order, onClose, onSplit }: { bill: Bill;
       if (assigned > item.quantity) slots[0] = Math.max(0, slots[0] - (assigned - item.quantity));
       return [item.id, slots];
     })));
+    setNeesieChecks((old) => new Set([...old].filter((check) => check < next)));
     setCount(next);
   };
 
   const totals = useMemo(() => Array.from({ length: count }, (_, checkIndex) => items.reduce((sum, item) => sum + Number(item.total) * (allocations[item.id]?.[checkIndex] || 0) / item.quantity, 0)), [allocations, count, items]);
 
+  const toggleNeesie = (check: number) => {
+    setNeesieChecks((old) => {
+      const next = new Set(old);
+      if (next.has(check)) next.delete(check);
+      else next.add(check);
+      return next;
+    });
+  };
+
   const submit = async () => {
     const invalid = items.some((item) => (allocations[item.id] || []).reduce((sum, value) => sum + value, 0) !== item.quantity)
       || Array.from({ length: count }, (_, check) => items.every((item) => !(allocations[item.id]?.[check] > 0))).some(Boolean);
+    if (neesieChecks.size > 0 && !order.customer_id) {
+      return toast.error(t('customerRequiredForAccount'));
+    }
     if (invalid) return toast.error(t('allocateAllItems'));
     setSaving(true);
     try {
@@ -53,7 +69,20 @@ export function SplitCheckModal({ bill, order, onClose, onSplit }: { bill: Bill;
         }),
       }));
       const { data } = await api.post(`/bills/${bill.id}/split-check`, { checks });
-      onSplit(data.bills);
+      const created: Bill[] = data.bills || [];
+      // Charge the toggled checks to the customer account (neesie). The bill
+      // payment endpoint derives the customer from the order, so no explicit
+      // customer_id is needed here.
+      if (neesieChecks.size > 0 && order.customer_id) {
+        for (const index of [...neesieChecks].sort((a, b) => a - b)) {
+          const target = created[index];
+          if (!target || Number(target.total) <= 0) continue;
+          await api.post(`/bills/${target.id}/payments`, {
+            payments: [{ method: 'customer_account', amount: Number(target.total) }],
+          });
+        }
+      }
+      onSplit(created);
     } catch {
       toast.error(t('splitCheckFailed'));
     } finally { setSaving(false); }
@@ -63,6 +92,25 @@ export function SplitCheckModal({ bill, order, onClose, onSplit }: { bill: Bill;
     <div className="p-5 border-b flex items-center justify-between"><div><h2 className="text-lg font-bold">{t('splitCheck')}</h2><p className="text-sm text-muted-foreground">{t('splitCheckHint')}</p></div><button onClick={onClose}><X size={20} /></button></div>
     <div className="p-5 border-b flex items-center gap-3"><span className="text-sm text-muted-foreground">{t('numberOfChecks')}</span><button onClick={() => resize(count - 1)} className="size-7 rounded-full bg-muted flex items-center justify-center"><Minus size={13} /></button><strong>{count}</strong><button onClick={() => resize(count + 1)} className="size-7 rounded-full bg-muted flex items-center justify-center"><Plus size={13} /></button></div>
     <div className="overflow-auto p-5"><table className="w-full text-sm"><thead><tr><th className="text-start p-2 sticky start-0 bg-card">{t('items')}</th>{Array.from({ length: count }, (_, i) => <th key={i} className="p-2 min-w-28"><input value={labels[i]} onChange={(e) => setLabels((old) => old.map((label, n) => n === i ? e.target.value.slice(0, 40) : label))} className="w-full text-center border rounded px-2 py-1" /></th>)}</tr></thead><tbody>{items.map((item: OrderItem) => <tr key={item.id} className="border-t"><td className="p-2 sticky start-0 bg-card"><div className="font-medium">{item.product_name}</div><div className="text-xs text-muted-foreground">{item.quantity} × {fmt(Number(item.total) / item.quantity)}</div></td>{Array.from({ length: count }, (_, i) => <td key={i} className="p-2"><input type="number" min="0" max={item.quantity} value={allocations[item.id]?.[i] || 0} onChange={(e) => { const value = Math.min(item.quantity, Math.max(0, Number(e.target.value) || 0)); setAllocations((old) => ({ ...old, [item.id]: old[item.id].map((qty, n) => n === i ? value : qty) })); }} className="w-full text-center border rounded px-2 py-1" /></td>)}</tr>)}</tbody><tfoot><tr className="border-t font-semibold"><td className="p-2">{t('estimatedItemsTotal')}</td>{totals.map((total, i) => <td key={i} className="p-2 text-center">{fmt(total)}</td>)}</tr></tfoot></table></div>
+    <div className="px-5 py-3 border-t flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-xs font-semibold text-foreground">{t('neesieChecksTitle')}</p>
+        <p className="text-[11px] text-muted-foreground truncate">{t('neesieChecksHint')}</p>
+      </div>
+      <div className="flex flex-wrap gap-1.5 justify-end">
+        {Array.from({ length: count }, (_, check) => (
+          <button
+            key={check}
+            type="button"
+            onClick={() => toggleNeesie(check)}
+            className={`max-w-36 truncate rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${neesieChecks.has(check) ? 'bg-brand text-white border-brand' : 'bg-muted text-foreground border-border hover:border-brand'}`}
+            title={labels[check]}
+          >
+            {labels[check]}
+          </button>
+        ))}
+      </div>
+    </div>
     <div className="p-5 border-t flex justify-end gap-2"><Button variant="outline" onClick={onClose}>{tCommon('cancel')}</Button><Button onClick={submit} disabled={saving}>{saving ? tCommon('saving') : t('createChecks')}</Button></div>
   </div></div>;
 }
