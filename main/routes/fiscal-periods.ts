@@ -16,6 +16,10 @@ import {
   deleteFiscalPeriod,
 } from '../services/fiscal-periods';
 
+function clientIpOf(req: Request): string {
+  return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
 const router = Router();
 
 function sendError(res: Response, error: unknown): void {
@@ -81,6 +85,10 @@ router.post('/:id/reopen', requireRole(...ROLE_ACCESS.owner), (req: Request, res
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
     const body = req.body || {};
+    // Override PINs are brute-force sensitive; reuse the refund PIN limiter.
+    if (!checkPinRateLimit(`pin:${clientIpOf(req)}:fiscal-reopen`)) {
+      return res.status(429).json({ error: 'Too many PIN attempts. Try again in 15 minutes.' });
+    }
     const period = reopenFiscalPeriod(getDatabase(), String(req.params.id), body.override_pin, body.approver_id, actor);
     res.json({ period });
   } catch (error: unknown) {
