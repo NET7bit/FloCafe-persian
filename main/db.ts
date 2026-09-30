@@ -5467,6 +5467,31 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
       `);
     },
   },
+  {
+    version: 101,
+    name: 'add_fiscal_periods',
+    up: () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS fiscal_periods (
+          id TEXT PRIMARY KEY,
+          period_type TEXT NOT NULL CHECK (period_type IN ('month', 'year')),
+          start_date TEXT NOT NULL CHECK (start_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+          end_date TEXT NOT NULL CHECK (end_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+          status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+          closed_at TEXT,
+          closed_by TEXT REFERENCES users(id),
+          reopened_at TEXT,
+          reopened_by TEXT REFERENCES users(id),
+          name TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CHECK (start_date <= end_date),
+          UNIQUE (period_type, start_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_fiscal_periods_range ON fiscal_periods(start_date, end_date);
+        CREATE INDEX IF NOT EXISTS idx_fiscal_periods_status ON fiscal_periods(status);
+      `);
+    },
+  },
 ];
 
 function syncBackupBeforeMigration(fromVersion: number, toVersion: number): void {

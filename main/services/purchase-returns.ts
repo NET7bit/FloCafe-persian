@@ -10,6 +10,7 @@ import { getSupplier } from './suppliers';
 import { getPurchaseInvoice } from './purchase-invoices';
 import { roundQuantity } from './units';
 import { applySupplyStockChange } from './supplies';
+import { assertNotInClosedPeriod } from './fiscal-periods';
 
 export type PurchaseReturnStatus = 'completed' | 'deleted';
 
@@ -248,6 +249,7 @@ export function createPurchaseReturn(
   const returnDate = input.returnDate === undefined || input.returnDate === null
     ? now().slice(0, 10)
     : assertValidDate(input.returnDate, 'return_date');
+  assertNotInClosedPeriod(db, returnDate);
   const reason = assertReason(input.reason);
   const notes = trimToNull(input.notes);
 
@@ -363,6 +365,7 @@ export function deletePurchaseReturn(
     if (record.status !== 'completed') {
       throw new PurchaseReturnError(409, 'this return has already been deleted');
     }
+    assertNotInClosedPeriod(db, record.return_date);
     const items = record.items || [];
     const invoice = getPurchaseInvoice(db, record.purchase_invoice_id, false);
     const timestamp = now();

@@ -2,6 +2,7 @@ import { randomBytes } from 'crypto';
 import { getDatabase, now, withTxn } from '../db';
 import { getSupplier } from './suppliers';
 import { getPurchaseInvoice } from './purchase-invoices';
+import { assertNotInClosedPeriod, fiscalDateForInstant } from './fiscal-periods';
 import type { PurchaseInvoiceStatus } from './purchase-invoices';
 
 export class SupplierPaymentError extends Error {
@@ -203,6 +204,7 @@ export function createSupplierPayment(
   const amount = assertAmount(input.amount);
   const paymentMethod = assertPaymentMethod(input.paymentMethod);
   const paidAt = assertPaidAt(input.paidAt);
+  assertNotInClosedPeriod(db, fiscalDateForInstant(paidAt));
 
   if (input.purchaseInvoiceId !== undefined && input.purchaseInvoiceId !== null) {
     const invoice = getPurchaseInvoice(db, input.purchaseInvoiceId, false);
@@ -242,6 +244,7 @@ export function deleteSupplierPayment(
   withTxn(() => {
     const payment = getSupplierPayment(db, id);
     const invoiceId = payment.purchase_invoice_id;
+    assertNotInClosedPeriod(db, fiscalDateForInstant(payment.paid_at));
     db.prepare('DELETE FROM supplier_payments WHERE id = ?').run(id);
     if (invoiceId) {
       // A paid invoice is terminal for recompute gating, so reopen it first.

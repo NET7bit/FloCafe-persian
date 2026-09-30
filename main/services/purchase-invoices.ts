@@ -3,6 +3,7 @@ import { getDatabase, now, withTxn, formatPurchaseInvoiceNumber, nextPurchaseInv
 import { getSupplier } from './suppliers';
 import { assertSupplyUnit, roundQuantity } from './units';
 import { applySupplyStockChange } from './supplies';
+import { assertNotInClosedPeriod } from './fiscal-periods';
 
 export type PurchaseInvoiceStatus = 'draft' | 'posted' | 'partially_paid' | 'paid' | 'cancelled';
 
@@ -345,6 +346,7 @@ export function postPurchaseInvoice(
     }
     const supplier = getSupplier(db, invoice.supplier_id);
     if (!supplier.is_active) throw new PurchaseInvoiceError(409, 'cannot post an invoice for an inactive supplier');
+    assertNotInClosedPeriod(db, invoice.invoice_date);
 
     for (const item of invoice.items) {
       applySupplyStockChange(db, {
@@ -382,6 +384,7 @@ export function cancelPurchaseInvoice(
     if (invoice.status !== 'draft') {
       throw new PurchaseInvoiceError(409, `only draft invoices can be cancelled (current status: ${invoice.status})`);
     }
+    assertNotInClosedPeriod(db, invoice.invoice_date);
     db.prepare(`
       UPDATE purchase_invoices SET status = 'cancelled', balance = 0, updated_at = ?
       WHERE id = ? AND status = 'draft'

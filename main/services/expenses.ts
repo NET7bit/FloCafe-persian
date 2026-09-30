@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
 import { getDatabase, now, withTxn } from '../db';
+import { assertNotInClosedPeriod } from './fiscal-periods';
 
 export class ExpenseError extends Error {
   readonly statusCode: number;
@@ -216,6 +217,7 @@ export function createExpense(
   const amount = assertAmount(input.amount);
   const paymentMethod = assertPaymentMethod(input.paymentMethod);
   const expenseDate = assertExpenseDate(input.expenseDate);
+  assertNotInClosedPeriod(db, expenseDate);
   const description = trimToNull(input.description);
   if (description && description.length > 200) {
     throw new ExpenseError(400, 'description is too long (max 200 characters)');
@@ -246,7 +248,8 @@ export function deleteExpense(
   _actorUserId: string,
 ): void {
   withTxn(() => {
-    getExpense(db, id);
+    const expense = getExpense(db, id);
+    assertNotInClosedPeriod(db, expense.expense_date);
     db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
   });
 }

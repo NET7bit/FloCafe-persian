@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto';
 import { getDatabase, now, withTxn } from '../db';
+import { assertNotInClosedPeriod } from './fiscal-periods';
 
 export class ReceivableError extends Error {
   readonly statusCode: number;
@@ -254,6 +255,7 @@ export function createReceivableEntry(
   const customer = getCustomerRow(db, input.customerId);
   const amount = assertAmount(input.amount);
   const entryDate = assertEntryDate(input.entryDate);
+  assertNotInClosedPeriod(db, entryDate);
 
   const entryType = input.entryType;
   if (!ENTRY_TYPES.includes(entryType as ReceivableEntryType)) {
@@ -315,7 +317,8 @@ export function deleteReceivableEntry(
   _actorUserId: string,
 ): void {
   withTxn(() => {
-    getReceivableEntry(db, id);
+    const entry = getReceivableEntry(db, id);
+    assertNotInClosedPeriod(db, entry.entry_date);
     db.prepare('DELETE FROM receivable_entries WHERE id = ?').run(id);
   });
 }
