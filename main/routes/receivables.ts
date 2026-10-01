@@ -11,6 +11,10 @@ import {
   listCustomerBalances,
   listReceivableEntries,
 } from '../services/receivables';
+import {
+  recordReceivableEntryAccounting,
+  recordReceivableEntryDeletionAccounting,
+} from '../services/accounting-receivables-adapter';
 
 const router = Router();
 
@@ -150,6 +154,11 @@ router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: R
       notes: body.notes,
       actorUserId: actor,
     });
+
+    // Post-commit projection: the entry is durable above; accounting
+    // failures are logged, never roll the entry back.
+    recordReceivableEntryAccounting(entry.id, actor);
+
     res.status(201).json({ entry });
   } catch (error: unknown) {
     sendError(res, error);
@@ -170,6 +179,11 @@ router.delete('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, r
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
     deleteReceivableEntry(getDatabase(), String(req.params.id), actor);
+
+    // Post-commit projection: the delete is durable above; accounting
+    // failures are logged, never roll the deletion back.
+    recordReceivableEntryDeletionAccounting(String(req.params.id), actor);
+
     res.json({ success: true });
   } catch (error: unknown) {
     sendError(res, error);
