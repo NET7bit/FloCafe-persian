@@ -20,7 +20,7 @@ Module._load = function (request: string, parent: unknown, isMain: boolean) {
 
 const { MIGRATIONS } = require('../main/db');
 const TARGET_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;
-const target = MIGRATIONS.find((m: any) => m.version === TARGET_VERSION);
+const v102 = MIGRATIONS.find((m: any) => m.version === 102);
 
 let passed = 0;
 let failed = 0;
@@ -42,9 +42,9 @@ function getDb(): any {
 }
 
 async function main() {
-  console.log(`Migration v${TARGET_VERSION} (add_accounting_core) test`);
+  console.log('Migration v102 (add_accounting_core) test');
   console.log('='.repeat(50));
-  assertEqual(TARGET_VERSION, 102, 'the last migration is v102');
+  assertEqual(!!v102, true, 'the v102 accounting-core migration is registered');
 
   // ── Fresh install: all migrations from v1 ──
   const { initDatabase } = require('../main/db');
@@ -151,7 +151,7 @@ async function main() {
 
   // ── Idempotent re-run ──
   let rerunFailed = false;
-  try { target.up(); target.up(); } catch { rerunFailed = true; }
+  try { v102.up(); v102.up(); } catch { rerunFailed = true; }
   assert(!rerunFailed, 're-running the migration is idempotent');
   assertEqual((db.prepare('SELECT COUNT(*) AS n FROM accounting_accounts').get() as any).n, 12, 're-run preserves existing rows');
 
@@ -197,7 +197,7 @@ async function main() {
       );
     `);
     legacy.pragma('user_version = 101');
-    target.up();
+    v102.up();
     assertEqual(legacy.prepare('SELECT COUNT(*) AS n FROM accounting_accounts').get().n, 12, 'legacy upgrade seeded the 12-account chart');
     assert(legacy.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='journal_entries'").get(), 'legacy upgrade created journal_entries');
     assertEqual(legacy.prepare('SELECT COUNT(*) AS n FROM suppliers').get().n, 1, 'legacy supplier data preserved');
