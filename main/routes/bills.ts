@@ -29,6 +29,7 @@ import {
 import { applyPayableRounding } from '../services/tax-engine';
 import { calculateOrderTotals } from '../services/orders';
 import { createReceivableEntry } from '../services/receivables';
+import { recordBillPaymentAccounting } from '../services/accounting-sales-adapter';
 import { sendEvent } from '../services/telemetry';
 import {
   getCurrencyFractionDigits,
@@ -1993,12 +1994,17 @@ function applyPaymentBatch(
   const newPaidCents = oldPaidCents + totalAppliedCents;
   const newBalanceCents = Math.max(0, totalCents - newPaidCents);
   const paymentStatus = newBalanceCents === 0 ? 'paid' : 'partial';
+  // One id per applyPaymentBatch call (the accounting adapter's sale-batch
+  // marker) plus one stable identity per applied line.
+  const paymentBatchId = randomUUID();
   const newPayments = prepared.map((line) => ({
     ...line.payment,
     cash_session_id: activeSessionId,
     amount: line.amountCents / minorFactor,
     requested_amount: (line.tenderedCents || line.amountCents) / minorFactor,
     amount_omitted: Boolean(line.amountOmitted),
+    event_id: randomUUID(),
+    batch_id: paymentBatchId,
     ...(isCashTender(db, line.payment) ? { tendered_amount: (line.tenderedCents || 0) / minorFactor, change_amount: (line.changeCents || 0) / minorFactor } : {}),
     timestamp: now(),
   }));
@@ -2079,6 +2085,10 @@ router.post('/:id/payment', requireRole(...ROLE_ACCESS.ownerManagerCashier), (re
       paymentIdempotencyKey(req), requestHash, String((req as any).user.userId),
     ));
 
+    // Post-commit projection: the payment is durable above; accounting
+    // failures are logged, never roll the bill back.
+    recordBillPaymentAccounting(req.params.id as string, String((req as any).user.userId));
+
     const billStatus = (result.bill as any)?.payment_status;
     if (billStatus === 'paid') notifyKdsUpdate();
     else notifyOrderUpdated();
@@ -2109,6 +2119,10 @@ router.post('/:id/payments', requireRole(...ROLE_ACCESS.ownerManagerCashier), (r
       db, req.params.id as string, payments, bodyCustomerId, false,
       paymentIdempotencyKey(req), requestHash, String((req as any).user.userId),
     ));
+
+    // Post-commit projection: the payment is durable above; accounting
+    // failures are logged, never roll the bill back.
+    recordBillPaymentAccounting(req.params.id as string, String((req as any).user.userId));
 
     const billStatus = (result.bill as any)?.payment_status;
     if (billStatus === 'paid') notifyKdsUpdate();

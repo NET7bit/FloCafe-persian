@@ -5,6 +5,7 @@ import { requireRole } from '../middleware/security';
 import { ROLE_ACCESS } from '../../shared/role-permissions';
 import { checkPinRateLimit } from './orders';
 import { createRefund, getTenantCurrency, RefundRequest } from '../services/refund';
+import { recordRefundAccounting } from '../services/accounting-sales-adapter';
 import { getCurrencyFractionDigits, getCurrencyMinorUnitFactor } from '../countries';
 
 const router = Router();
@@ -111,6 +112,11 @@ router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: R
     };
 
     const result = withTxn(() => createRefund(db, refundRequest));
+
+    // Post-commit projection: the refund is durable above; accounting
+    // failures are logged, never roll the refund back.
+    recordRefundAccounting(result.refund?.id, userId);
+
     res.status(201).json(result);
   } catch (error: any) {
     res.status(error.statusCode || 500).json({ error: error.message || 'Unable to process refund' });
