@@ -5492,6 +5492,78 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
       `);
     },
   },
+  {
+    version: 102,
+    name: 'add_accounting_core',
+    up: () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS accounting_accounts (
+          id TEXT PRIMARY KEY,
+          code TEXT UNIQUE,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL CHECK (type IN ('asset', 'liability', 'equity', 'revenue', 'expense')),
+          normal_side TEXT NOT NULL CHECK (normal_side IN ('debit', 'credit')),
+          is_system INTEGER NOT NULL DEFAULT 1,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_accounting_accounts_type ON accounting_accounts(type);
+        CREATE INDEX IF NOT EXISTS idx_accounting_accounts_active ON accounting_accounts(is_active);
+
+        CREATE TABLE IF NOT EXISTS journal_entries (
+          id TEXT PRIMARY KEY,
+          entry_date TEXT NOT NULL,
+          description TEXT,
+          source_module TEXT NOT NULL CHECK (source_module IN ('sales', 'refunds', 'receivables', 'purchases', 'supplier_payments', 'purchase_returns', 'expenses', 'manual')),
+          source_id TEXT,
+          seq INTEGER NOT NULL DEFAULT 1,
+          reference TEXT,
+          status TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('posted', 'reversed')),
+          reverses_journal_id TEXT REFERENCES journal_entries(id),
+          created_by TEXT REFERENCES users(id),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (source_module, source_id, seq)
+        );
+        CREATE INDEX IF NOT EXISTS idx_journal_entries_module_source ON journal_entries(source_module, source_id);
+        CREATE INDEX IF NOT EXISTS idx_journal_entries_date ON journal_entries(entry_date);
+        CREATE INDEX IF NOT EXISTS idx_journal_entries_status ON journal_entries(status);
+        CREATE INDEX IF NOT EXISTS idx_journal_entries_reverses ON journal_entries(reverses_journal_id);
+        CREATE INDEX IF NOT EXISTS idx_journal_entries_created_by ON journal_entries(created_by);
+
+        CREATE TABLE IF NOT EXISTS journal_entry_lines (
+          id TEXT PRIMARY KEY,
+          journal_id TEXT NOT NULL REFERENCES journal_entries(id) ON DELETE RESTRICT,
+          account_id TEXT NOT NULL REFERENCES accounting_accounts(id),
+          direction TEXT NOT NULL CHECK (direction IN ('debit', 'credit')),
+          amount REAL NOT NULL CHECK (amount > 0),
+          line_description TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_journal_entry_lines_journal ON journal_entry_lines(journal_id);
+        CREATE INDEX IF NOT EXISTS idx_journal_entry_lines_account ON journal_entry_lines(account_id);
+      `);
+
+      const accounts: Array<[string, string, string, string]> = [
+        ['1000', 'Cash', 'asset', 'debit'],
+        ['1010', 'Bank/Card', 'asset', 'debit'],
+        ['1100', 'Accounts Receivable', 'asset', 'debit'],
+        ['1200', 'Inventory — Purchases Holding', 'asset', 'debit'],
+        ['2000', 'Accounts Payable', 'liability', 'credit'],
+        ['2100', 'Sales Tax Payable', 'liability', 'credit'],
+        ['3000', 'Opening Equity', 'equity', 'credit'],
+        ['4000', 'Sales Revenue', 'revenue', 'credit'],
+        ['4010', 'Sales Returns', 'revenue', 'debit'],
+        ['4020', 'Sales Discounts', 'revenue', 'debit'],
+        ['5000', 'Operating Expenses', 'expense', 'debit'],
+        ['5900', 'Cash Over/Short', 'expense', 'debit'],
+      ];
+      const insertAccount = db.prepare(`
+        INSERT OR IGNORE INTO accounting_accounts (id, code, name, type, normal_side, is_system, is_active)
+        VALUES (?, ?, ?, ?, ?, 1, 1)
+      `);
+      for (const [code, name, type, side] of accounts) insertAccount.run(`acct_${code}`, code, name, type, side);
+    },
+  },
 ];
 
 function syncBackupBeforeMigration(fromVersion: number, toVersion: number): void {

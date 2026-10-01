@@ -72,8 +72,8 @@ function runUpTo(version: number): void {
 async function main() {
   console.log(`Migration v${TARGET_VERSION} (add_fiscal_periods) test`);
   console.log('='.repeat(50));
-  if (TARGET_VERSION !== 101) {
-    console.error(`Expected target version 101 but the last migration is v${TARGET_VERSION}`);
+  if (TARGET_VERSION < 101) {
+    console.error(`Expected the migration chain to include v101 but the last migration is v${TARGET_VERSION}`);
     process.exit(1);
   }
 
