@@ -10,6 +10,10 @@ import {
   getExpenseSummary,
   listExpenses,
 } from '../services/expenses';
+import {
+  recordExpenseAccounting,
+  recordExpenseDeletionAccounting,
+} from '../services/accounting-expenses-adapter';
 
 const router = Router();
 
@@ -88,6 +92,7 @@ router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: R
       notes: body.notes,
       actorUserId: actor,
     });
+    recordExpenseAccounting(expense.id, actor);
     res.status(201).json({ expense });
   } catch (error: unknown) {
     sendError(res, error);
@@ -108,6 +113,7 @@ router.delete('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, r
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
     deleteExpense(getDatabase(), String(req.params.id), actor);
+    recordExpenseDeletionAccounting(String(req.params.id), actor);
     res.json({ success: true });
   } catch (error: unknown) {
     sendError(res, error);

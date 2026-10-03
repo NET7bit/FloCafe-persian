@@ -17,6 +17,10 @@ import {
   listUnresolvedPurchaseEvents,
   reprocessPurchaseAccounting,
 } from '../services/accounting-purchases-adapter';
+import {
+  listUnresolvedExpenses,
+  reprocessExpenseAccounting,
+} from '../services/accounting-expenses-adapter';
 
 const router = Router();
 
@@ -154,6 +158,28 @@ router.post('/purchases/:kind/:id/reprocess', requireRole(...ROLE_ACCESS.owner),
       return res.status(400).json({ error: 'kind is invalid' });
     }
     res.json({ result: reprocessPurchaseAccounting(kind, String(req.params.id), actor) });
+  } catch (error: unknown) {
+    sendError(res, error);
+  }
+});
+
+// Read-only, derived list of expenses whose accounting projection is missing
+// (no journal) or incomplete (no reversal).
+router.get('/expenses/unresolved', requireRole(...ROLE_ACCESS.ownerManager), (_req: Request, res: Response) => {
+  try {
+    res.json({ events: listUnresolvedExpenses() });
+  } catch (error: unknown) {
+    sendError(res, error);
+  }
+});
+
+// Explicitly completes the accounting projection for one expense source
+// event; the expense id is the only client input, identity is server-derived.
+router.post('/expenses/:id/reprocess', requireRole(...ROLE_ACCESS.owner), (req: Request, res: Response) => {
+  try {
+    const actor = actorId(req);
+    if (!actor) return res.status(403).json({ error: 'Authentication required' });
+    res.json({ result: reprocessExpenseAccounting(String(req.params.id), actor) });
   } catch (error: unknown) {
     sendError(res, error);
   }
