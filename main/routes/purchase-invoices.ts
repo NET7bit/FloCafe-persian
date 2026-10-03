@@ -11,6 +11,7 @@ import {
   postPurchaseInvoice,
   updatePurchaseInvoice,
 } from '../services/purchase-invoices';
+import { recordPurchaseInvoiceAccounting } from '../services/accounting-purchases-adapter';
 
 const router = Router();
 
@@ -127,6 +128,7 @@ router.post('/:id/post', requireRole(...ROLE_ACCESS.ownerManager), (req: Request
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
     const invoice = postPurchaseInvoice(getDatabase(), String(req.params.id), actor);
+    recordPurchaseInvoiceAccounting(invoice.id, actor);
     res.json({ invoice });
   } catch (error: unknown) {
     sendError(res, error);

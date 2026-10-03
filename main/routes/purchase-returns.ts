@@ -8,6 +8,10 @@ import {
   getPurchaseReturn,
   listPurchaseReturns,
 } from '../services/purchase-returns';
+import {
+  recordPurchaseReturnAccounting,
+  recordPurchaseReturnDeletionAccounting,
+} from '../services/accounting-purchases-adapter';
 
 const router = Router();
 
@@ -71,6 +75,7 @@ router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: R
       })),
       actorUserId: actor,
     });
+    recordPurchaseReturnAccounting(record.id, actor);
     res.status(201).json({ return: record });
   } catch (error: unknown) {
     sendError(res, error);
@@ -91,6 +96,7 @@ router.delete('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, r
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
     const record = deletePurchaseReturn(getDatabase(), String(req.params.id), actor, req.body?.deletion_reason);
+    recordPurchaseReturnDeletionAccounting(String(req.params.id), actor);
     res.json({ return: record });
   } catch (error: unknown) {
     sendError(res, error);

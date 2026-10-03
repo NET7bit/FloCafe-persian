@@ -10,6 +10,10 @@ import {
   getSupplierPayment,
   listSupplierPayments,
 } from '../services/supplier-payments';
+import {
+  recordSupplierPaymentAccounting,
+  recordSupplierPaymentDeletionAccounting,
+} from '../services/accounting-purchases-adapter';
 
 const router = Router();
 
@@ -75,6 +79,7 @@ router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: R
       notes: body.notes,
       actorUserId: actor,
     });
+    recordSupplierPaymentAccounting(payment.id, actor);
     res.status(201).json({ payment });
   } catch (error: unknown) {
     sendError(res, error);
@@ -104,6 +109,7 @@ router.delete('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, r
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
     deleteSupplierPayment(getDatabase(), String(req.params.id), actor);
+    recordSupplierPaymentDeletionAccounting(String(req.params.id), actor);
     res.json({ success: true });
   } catch (error: unknown) {
     sendError(res, error);
