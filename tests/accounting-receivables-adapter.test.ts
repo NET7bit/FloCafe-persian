@@ -262,6 +262,177 @@ async function main() {
   );
   server.close();
 
+  // ── Production surface: read-only discovery + explicit one-event reprocess ──
+  const { accountingRoutes } = require('../main/routes/accounting');
+  const manager = seedManagerUser(db);
+  const accApp = createApp({ '/api/accounting': accountingRoutes });
+  const acc = await startServer(accApp);
+
+  // Discovery is derived and read-only.
+  const journalsBefore = (db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get() as any).n;
+  const discovery = await api(acc.baseUrl, '/api/accounting/receivables/unresolved', { method: 'GET', headers: owner.authHeader });
+  assertEqual(discovery.status, 200, 'GET unresolved discovery succeeds for owner');
+  const discoveredIds = discovery.data.events.map((e: any) => e.entry_id);
+  assert(discoveredIds.includes(otherSettlement.id), 'discovery lists the unjournalized `other` settlement (missing journal)');
+  assert(!discoveredIds.includes(transfer.id), 'discovery excludes a journalized settlement');
+  assert(!discoveredIds.includes(manualCharge.id), 'discovery excludes charge rows (not a D event)');
+  assert(!discoveredIds.includes(adjustment.id), 'discovery excludes adjustment rows');
+  assertEqual(
+    discovery.data.events.find((e: any) => e.entry_id === otherSettlement.id).state,
+    'missing_journal',
+    'discovered unjournalized settlement reports missing_journal',
+  );
+  assertEqual(
+    discovery.data.events.find((e: any) => e.entry_id === otherSettlement.id).journalizable,
+    false,
+    '`other` settlement is listed but not journalizable',
+  );
+  assertEqual(
+    (db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get() as any).n,
+    journalsBefore,
+    'discovery is read-only (no journal created)',
+  );
+
+  // Authorization: reads are ownerManager, reprocess is owner-only.
+  assertEqual((await api(acc.baseUrl, '/api/accounting/receivables/unresolved')).status, 401, 'discovery requires authentication');
+  assertEqual((await api(acc.baseUrl, '/api/accounting/receivables/unresolved', { headers: manager.authHeader })).status, 200, 'discovery allows manager (ownerManager)');
+  assertEqual(
+    (await api(acc.baseUrl, `/api/accounting/receivables/${transfer.id}/reprocess`, { method: 'POST', headers: manager.authHeader })).status,
+    403,
+    'reprocess rejects a manager (owner-only)',
+  );
+  assertEqual(
+    (await api(acc.baseUrl, `/api/accounting/receivables/${transfer.id}/reprocess`, { method: 'POST' })).status,
+    401,
+    'reprocess requires authentication',
+  );
+
+  // Reprocess no-op / skip cases.
+  assertEqual(
+    (await api(acc.baseUrl, '/api/accounting/receivables/does-not-exist/reprocess', { method: 'POST', headers: owner.authHeader })).data.result.status,
+    'nothing_to_do',
+    'reprocess of an unknown id is a no-op',
+  );
+  assertEqual(
+    (await api(acc.baseUrl, `/api/accounting/receivables/${transfer.id}/reprocess`, { method: 'POST', headers: owner.authHeader })).data.result.status,
+    'already_journalized',
+    'reprocess of an already journalized settlement is a no-op',
+  );
+  assertEqual(journalCount(db, 'receivables', transfer.id), 1, 'no-op reprocess creates no duplicate journal');
+  assertEqual(
+    (await api(acc.baseUrl, `/api/accounting/receivables/${manualCharge.id}/reprocess`, { method: 'POST', headers: owner.authHeader })).data.result.status,
+    'skipped',
+    'reprocess of a non-settlement row is skipped, never journaled',
+  );
+  assertEqual(
+    (await api(acc.baseUrl, `/api/accounting/receivables/${otherSettlement.id}/reprocess`, { method: 'POST', headers: owner.authHeader })).data.result.status,
+    'skipped',
+    'reprocess of `other` settlement is skipped (no v1 account)',
+  );
+  assertEqual(journalCount(db, 'receivables', otherSettlement.id), 0, '`other` reprocess left no journal');
+
+  // The client may only name the source row; identity/amount come from the source.
+  const overrideSource = createReceivableEntry(db, {
+    customerId: 'cust-d', entryType: 'settlement', amount: 90,
+    paymentMethod: 'cash', entryDate: TODAY, actorUserId: owner.userId,
+  });
+  const overridden = await api(acc.baseUrl, `/api/accounting/receivables/${overrideSource.id}/reprocess`, {
+    method: 'POST', headers: owner.authHeader,
+    body: { source_module: 'sales', source_id: 'evil', seq: 99, amount: 999999 },
+  });
+  assertEqual(overridden.data.result.status, 'journalized', 'reprocess journals a missing settlement projection');
+  const overrideJournal: any = db.prepare("SELECT * FROM journal_entries WHERE source_module = 'receivables' AND source_id = ? AND seq = 1").get(overrideSource.id);
+  assert(!!overrideJournal, 'client body cannot override identity: journal keeps receivables + entry id + seq 1');
+  assertEqual(
+    linesOf(db, overrideJournal.id).reduce((s: number, l: any) => s + (l.direction === 'debit' ? l.amount : 0), 0),
+    90,
+    'client-supplied amount is ignored; the journal uses the source amount',
+  );
+
+  // Missing reversal: source deleted but the adapter step never ran.
+  const orphanSource = createReceivableEntry(db, {
+    customerId: 'cust-d', entryType: 'settlement', amount: 210,
+    paymentMethod: 'card', entryDate: TODAY, actorUserId: owner.userId,
+  });
+  recordReceivableEntryAccounting(orphanSource.id, owner.userId);
+  const orphanJournal: any = db.prepare('SELECT * FROM journal_entries WHERE source_module = ? AND source_id = ?').get('receivables', orphanSource.id);
+  deleteReceivableEntry(db, orphanSource.id, owner.userId);
+  assertEqual(
+    (db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE reverses_journal_id = ?').get(orphanJournal.id) as any).n,
+    0,
+    'the simulated adapter failure left the posted journal without a reversal',
+  );
+  const unresolvedAfterDelete = await api(acc.baseUrl, '/api/accounting/receivables/unresolved', { method: 'GET', headers: owner.authHeader });
+  const orphanItem = unresolvedAfterDelete.data.events.find((e: any) => e.entry_id === orphanSource.id);
+  assert(!!orphanItem && orphanItem.state === 'missing_reversal', 'discovery derives missing_reversal for a deleted source with a posted journal');
+
+  const repaired = await api(acc.baseUrl, `/api/accounting/receivables/${orphanSource.id}/reprocess`, { method: 'POST', headers: owner.authHeader });
+  assertEqual(repaired.data.result.status, 'reversal_created', 'reprocess creates the missing reversal');
+  assertEqual(
+    (db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE reverses_journal_id = ?').get(orphanJournal.id) as any).n,
+    1,
+    'exactly one reversal exists after reprocess',
+  );
+  const orphanReversal: any = db.prepare('SELECT * FROM journal_entries WHERE reverses_journal_id = ?').get(orphanJournal.id);
+  const orphanReversalLines = linesOf(db, orphanReversal.id);
+  assert(
+    orphanReversalLines.some((l) => l.code === '1100' && l.direction === 'debit')
+      && orphanReversalLines.some((l) => l.code === '1010' && l.direction === 'credit'),
+    'the missing reversal is the exact inverse of the original (Dr 1100 / Cr 1010)',
+  );
+  assertEqual(
+    (await api(acc.baseUrl, `/api/accounting/receivables/${orphanSource.id}/reprocess`, { method: 'POST', headers: owner.authHeader })).data.result.status,
+    'already_reversed',
+    'repeated reprocess after repair is a no-op',
+  );
+  assertEqual(
+    (db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE reverses_journal_id = ?').get(orphanJournal.id) as any).n,
+    1,
+    'repeated reprocess creates no second reversal',
+  );
+  assertEqual(journalCount(db, 'receivables', orphanSource.id), 2, 'no resurrection: the original journal is never rebuilt');
+
+  // Deleted + never journalized is a no-op.
+  const goneUnjournalized = createReceivableEntry(db, {
+    customerId: 'cust-d', entryType: 'settlement', amount: 5,
+    paymentMethod: 'other', entryDate: TODAY, actorUserId: owner.userId,
+  });
+  deleteReceivableEntry(db, goneUnjournalized.id, owner.userId);
+  assertEqual(
+    (await api(acc.baseUrl, `/api/accounting/receivables/${goneUnjournalized.id}/reprocess`, { method: 'POST', headers: owner.authHeader })).data.result.status,
+    'nothing_to_do',
+    'reprocess of a deleted, never-journalized settlement creates nothing',
+  );
+
+  // Closed period stays unresolved; reopen then reprocess creates exactly one journal.
+  const OLD_MONTH = (() => {
+    const d = new Date();
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() - 3);
+    return d.toISOString().slice(0, 10);
+  })();
+  const oldPeriod = createFiscalPeriod(db, { periodType: 'month', startDate: OLD_MONTH, actorUserId: owner.userId });
+  const closedViaHttp = createReceivableEntry(db, {
+    customerId: 'cust-d', entryType: 'settlement', amount: 130,
+    paymentMethod: 'cash', entryDate: OLD_MONTH, actorUserId: owner.userId,
+  });
+  closeFiscalPeriod(db, oldPeriod.id, owner.userId);
+  assertEqual(
+    (await api(acc.baseUrl, `/api/accounting/receivables/${closedViaHttp.id}/reprocess`, { method: 'POST', headers: owner.authHeader })).data.result.status,
+    'skipped',
+    'reprocess is blocked by the closed period (fiscal gate)',
+  );
+  assertEqual(journalCount(db, 'receivables', closedViaHttp.id), 0, 'closed-period reprocess creates no journal');
+  db.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(require('bcryptjs').hashSync('1234', 10), owner.userId);
+  reopenFiscalPeriod(db, oldPeriod.id, '1234', owner.userId, owner.userId);
+  assertEqual(
+    (await api(acc.baseUrl, `/api/accounting/receivables/${closedViaHttp.id}/reprocess`, { method: 'POST', headers: owner.authHeader })).data.result.status,
+    'journalized',
+    'reprocess after reopen creates the pending journal',
+  );
+  assertEqual(journalCount(db, 'receivables', closedViaHttp.id), 1, 'reopen reprocess creates exactly one journal (no duplicate)');
+  acc.server.close();
+
   console.log('='.repeat(50));
   const { passed, failed } = getResults();
   console.log(`${passed}/${passed + failed} passed, ${failed} failed`);

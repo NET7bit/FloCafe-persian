@@ -8,6 +8,10 @@ import {
   listAccounts,
   reverseJournal,
 } from '../services/accounting';
+import {
+  listUnresolvedReceivableSettlements,
+  reprocessReceivableAccounting,
+} from '../services/accounting-receivables-adapter';
 
 const router = Router();
 
@@ -97,6 +101,28 @@ router.post('/journals/:id/reverse', requireRole(...ROLE_ACCESS.owner), (req: Re
   try {
     const journal = reverseJournal(String(req.params.id), actorId(req), reversalDate(req));
     res.status(201).json({ journal });
+  } catch (error: unknown) {
+    sendError(res, error);
+  }
+});
+
+// Read-only, derived list of receivable settlements whose accounting
+// projection is missing (no journal) or incomplete (no reversal).
+router.get('/receivables/unresolved', requireRole(...ROLE_ACCESS.ownerManager), (_req: Request, res: Response) => {
+  try {
+    res.json({ events: listUnresolvedReceivableSettlements() });
+  } catch (error: unknown) {
+    sendError(res, error);
+  }
+});
+
+// Explicitly completes the accounting projection for one receivable source
+// event; the event id is the only client input, identity is server-derived.
+router.post('/receivables/:id/reprocess', requireRole(...ROLE_ACCESS.owner), (req: Request, res: Response) => {
+  try {
+    const actor = actorId(req);
+    if (!actor) return res.status(403).json({ error: 'Authentication required' });
+    res.json({ result: reprocessReceivableAccounting(String(req.params.id), actor) });
   } catch (error: unknown) {
     sendError(res, error);
   }
