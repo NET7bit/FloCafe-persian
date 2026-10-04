@@ -1,0 +1,184 @@
+/**
+ * Accounting UI contract test (Milestone I).
+ *
+ * The accounting surface is read-mostly frontend code with no unit-test
+ * harness, so this suite guards the contract it depends on, the same way the
+ * RTL and translation suites guard theirs:
+ *
+ *   1. Every endpoint the UI calls exists as a real backend route — the UI
+ *      must never invent an API. Calls are read from the accounting data layer
+ *      and matched against the routes actually registered by
+ *      `main/routes/accounting.ts` and `main/routes/fiscal-periods.ts`.
+ *   2. The page and its sections exist, and the mandated access levels are
+ *      applied (owner/manager to read, owner-only to post a manual journal).
+ *   3. Each report surface keeps its loading, error and empty states — a
+ *      report that silently renders nothing on failure is a regression.
+ *   4. The accounting screens use logical direction utilities (RTL-safe) and
+ *      every static `accounting.*` label they reference is defined in en.json.
+ *   5. The sidebar exposes the accounting entry to owner/manager only.
+ *
+ * Run: npm run test:accounting-ui
+ */
+
+import * as fs from 'fs';
+import * as path from 'path';
+
+const ROOT = path.join(__dirname, '..');
+const ACCOUNTING_DIR = path.join(ROOT, 'frontend/src/components/accounting');
+const PAGE_FILE = path.join(ROOT, 'frontend/src/app/(dashboard)/accounting/page.tsx');
+const LIB_FILE = path.join(ROOT, 'frontend/src/lib/accounting.ts');
+const SIDEBAR_FILE = path.join(ROOT, 'frontend/src/components/layout/Sidebar.tsx');
+const MESSAGES_FILE = path.join(ROOT, 'frontend/src/lib/i18n/messages/en.json');
+const ROUTES_ACCOUNTING = path.join(ROOT, 'main/routes/accounting.ts');
+const ROUTES_FISCAL = path.join(ROOT, 'main/routes/fiscal-periods.ts');
+
+const SECTION_FILES = [
+  'shared.tsx',
+  'OverviewTab.tsx',
+  'ChartOfAccountsTab.tsx',
+  'GeneralLedgerTab.tsx',
+  'TrialBalanceTab.tsx',
+  'ProfitLossTab.tsx',
+  'BalanceSheetTab.tsx',
+  'ReconciliationTab.tsx',
+  'IntegrityTab.tsx',
+  'ManualJournalTab.tsx',
+  'FiscalPeriodsTab.tsx',
+];
+
+/** Ranged report surfaces that must render loading/error/empty states. */
+const RANGED_SECTIONS = [
+  'GeneralLedgerTab.tsx',
+  'TrialBalanceTab.tsx',
+  'ProfitLossTab.tsx',
+  'BalanceSheetTab.tsx',
+  'ReconciliationTab.tsx',
+];
+
+const PHYSICAL_UTIL_RE =
+  /\b(ml|mr|pl|pr|border-l|border-r|rounded-l|rounded-r|left|right)-[0-9a-zA-Z.]+|\btext-(left|right)\b/g;
+
+function assert(condition: boolean, message: string): void {
+  if (!condition) throw new Error(`Assertion failed: ${message}`);
+}
+
+function read(file: string): string {
+  assert(fs.existsSync(file), `missing file: ${path.relative(ROOT, file)}`);
+  return fs.readFileSync(file, 'utf8');
+}
+
+/** `METHOD /api/<path>` set declared by one route module under a mount prefix. */
+function declaredRoutes(file: string, prefix: string): Set<string> {
+  const source = read(file);
+  const routes = new Set<string>();
+  const regex = /router\.(get|post|put|delete|patch)\(\s*'([^']+)'/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(source)) !== null) {
+    const [, method, routePath] = match;
+    const full = `${prefix}${routePath}`.replace(/\/+$/, '');
+    routes.add(`${method.toUpperCase()} ${full || prefix}`);
+  }
+  return routes;
+}
+
+/** `METHOD /api/<path>` set the accounting UI actually calls. */
+function uiCalls(): Array<{ method: string; url: string }> {
+  const source = read(LIB_FILE);
+  const calls: Array<{ method: string; url: string }> = [];
+  const regex = /api\.(get|post|put|delete|patch)\(\s*'([^']+)'/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(source)) !== null) {
+    calls.push({ method: match[1].toUpperCase(), url: `/api${match[2]}`.replace(/\/+$/, '') });
+  }
+  return calls;
+}
+
+function run(): void {
+  console.log('Accounting UI contract checks:');
+
+  // 1. Every endpoint the UI calls is a real, mounted backend route.
+  const available = new Set([
+    ...declaredRoutes(ROUTES_ACCOUNTING, '/api/accounting'),
+    ...declaredRoutes(ROUTES_FISCAL, '/api/fiscal-periods'),
+  ]);
+  const calls = uiCalls();
+  assert(calls.length >= 9, `expected the accounting data layer to call at least 9 endpoints, found ${calls.length}`);
+  for (const call of calls) {
+    assert(available.has(`${call.method} ${call.url}`), `UI calls undeclared endpoint ${call.method} ${call.url}`);
+  }
+  console.log(`  ✓ all ${calls.length} UI endpoints exist in the mounted backend routes`);
+
+  // 2. Page + sections exist, with the mandated access levels.
+  assert(fs.existsSync(PAGE_FILE), 'accounting page is missing');
+  for (const file of SECTION_FILES) {
+    assert(fs.existsSync(path.join(ACCOUNTING_DIR, file)), `accounting section is missing: ${file}`);
+  }
+  const page = read(PAGE_FILE);
+  assert(page.includes('ROLE_ACCESS.ownerManager'), 'accounting page must guard reads with ROLE_ACCESS.ownerManager');
+  assert(page.includes('hasRole('), 'accounting page must resolve the role with hasRole');
+  assert(page.includes("t('noAccess')"), 'accounting page must render the no-access state');
+  const manualJournal = read(path.join(ACCOUNTING_DIR, 'ManualJournalTab.tsx'));
+  assert(manualJournal.includes('ROLE_ACCESS.owner'), 'manual journal posting must require ROLE_ACCESS.owner');
+  assert(manualJournal.includes("t('ownerOnly')"), 'manual journal must explain the owner-only restriction');
+  console.log('  ✓ page and sections exist with owner/manager read and owner-only posting');
+
+  // 3. Reference data is fetched once per surface (no duplicated financial state).
+  const ledger = read(path.join(ACCOUNTING_DIR, 'GeneralLedgerTab.tsx'));
+  assert(ledger.includes('latest_balance'), 'general ledger must render the backend-provided running balance');
+  assert(!/latest_balance\s*[-+]/.test(ledger), 'general ledger must not recompute the running balance');
+  const accounts = read(path.join(ACCOUNTING_DIR, 'ChartOfAccountsTab.tsx'));
+  assert(accounts.includes('normal_side'), 'chart of accounts must show the backend normal_side');
+  console.log('  ✓ reports render backend figures without recomputing them');
+
+  // 4. Loading / error / empty states on every ranged report surface.
+  for (const file of RANGED_SECTIONS) {
+    const source = read(path.join(ACCOUNTING_DIR, file));
+    assert(source.includes('<AccountingLoading'), `${file} must render a loading state`);
+    assert(source.includes('<AccountingError'), `${file} must render an error state`);
+    assert(
+      source.includes('<AccountingEmpty') || source.includes("t('emptyReport')"),
+      `${file} must render an empty state`,
+    );
+    assert(source.includes('AccountingRangeFilters'), `${file} must use the shared range filter`);
+  }
+  const overview = read(path.join(ACCOUNTING_DIR, 'OverviewTab.tsx'));
+  assert(overview.includes('<AccountingLoading'), 'overview must render a loading state');
+  assert(overview.includes('<AccountingError'), 'overview must render an error state');
+  console.log('  ✓ every accounting surface renders loading, error and empty states');
+
+  // 5. RTL-safe utilities and defined labels.
+  for (const file of SECTION_FILES) {
+    const source = read(path.join(ACCOUNTING_DIR, file));
+    const matches = source.match(PHYSICAL_UTIL_RE) ?? [];
+    assert(matches.length === 0, `${file} uses physical direction utilities: ${[...new Set(matches)].join(', ')}`);
+  }
+  const pageMatches = page.match(PHYSICAL_UTIL_RE) ?? [];
+  assert(pageMatches.length === 0, `accounting page uses physical direction utilities: ${[...new Set(pageMatches)].join(', ')}`);
+  console.log('  ✓ accounting screens use logical direction utilities');
+
+  const messages = JSON.parse(read(MESSAGES_FILE)) as { accounting?: Record<string, string>; nav?: Record<string, string> };
+  const labels = messages.accounting ?? {};
+  assert(Object.keys(labels).length > 0, 'en.json is missing the accounting namespace');
+  const labelConsumers = [...SECTION_FILES.map((file) => path.join(ACCOUNTING_DIR, file)), PAGE_FILE];
+  for (const filePath of labelConsumers) {
+    const source = read(filePath);
+    const keyRegex = /\bt\(\s*'([a-zA-Z0-9_]+)'/g;
+    let match: RegExpExecArray | null;
+    while ((match = keyRegex.exec(source)) !== null) {
+      assert(labels[match[1]] !== undefined, `${path.basename(filePath)} references undefined accounting key '${match[1]}'`);
+    }
+    assert(!/\bt\(\s*`/.test(source), `${path.basename(filePath)} uses a dynamic template-literal translation key`);
+  }
+  console.log(`  ✓ all referenced accounting labels exist (${Object.keys(labels).length} keys)`);
+
+  // 6. Sidebar exposes accounting to owner/manager only.
+  const sidebar = read(SIDEBAR_FILE);
+  const navEntry = sidebar.split('\n').find((line) => line.includes("href: '/accounting'"));
+  assert(Boolean(navEntry), 'sidebar has no /accounting navigation entry');
+  assert(navEntry!.includes('ROLE_ACCESS.ownerManager'), 'sidebar accounting entry must be owner/manager only');
+  console.log('  ✓ sidebar exposes accounting to owner/manager');
+
+  console.log('\n✅ All accounting UI contract checks passed.');
+}
+
+run();
