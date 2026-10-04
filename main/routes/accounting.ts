@@ -25,6 +25,14 @@ import {
   listUnresolvedCogsEvents,
   reprocessCogsAccounting,
 } from '../services/accounting-cogs-adapter';
+import {
+  getGeneralLedger,
+  getTrialBalance,
+  getProfitAndLoss,
+  getBalanceSheet,
+  getIntegrityChecks,
+} from '../services/accounting-reports';
+import { getReconciliation } from '../services/accounting-reconciliation';
 
 const router = Router();
 
@@ -206,6 +214,79 @@ router.post('/cogs/:id/reprocess', requireRole(...ROLE_ACCESS.owner), (req: Requ
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
     res.json({ result: reprocessCogsAccounting(String(req.params.id), actor) });
+  } catch (error: unknown) {
+    sendError(res, error);
+  }
+});
+
+// ── Reports (Milestone H): read-only projections of the ledger ──
+
+function queryString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  return value.trim() === '' ? null : value;
+}
+
+function reportRange(req: Request): { from: string | null; to: string | null; periodId: string | null } {
+  return {
+    from: queryString(req.query.from),
+    to: queryString(req.query.to),
+    periodId: queryString(req.query.period_id),
+  };
+}
+
+router.get('/reports/general-ledger', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+  try {
+    res.json({
+      report: getGeneralLedger({
+        ...reportRange(req),
+        accountCode: queryString(req.query.account_code),
+        accountId: queryString(req.query.account_id),
+        sourceModule: queryString(req.query.source_module),
+        sourceId: queryString(req.query.source_id),
+        reference: queryString(req.query.reference),
+      }),
+    });
+  } catch (error: unknown) {
+    sendError(res, error);
+  }
+});
+
+router.get('/reports/trial-balance', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+  try {
+    res.json({ report: getTrialBalance(reportRange(req)) });
+  } catch (error: unknown) {
+    sendError(res, error);
+  }
+});
+
+router.get('/reports/profit-loss', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+  try {
+    res.json({ report: getProfitAndLoss(reportRange(req)) });
+  } catch (error: unknown) {
+    sendError(res, error);
+  }
+});
+
+router.get('/reports/balance-sheet', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+  try {
+    res.json({ report: getBalanceSheet(reportRange(req)) });
+  } catch (error: unknown) {
+    sendError(res, error);
+  }
+});
+
+router.get('/reports/reconciliation', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+  try {
+    res.json({ report: getReconciliation(reportRange(req)) });
+  } catch (error: unknown) {
+    sendError(res, error);
+  }
+});
+
+// Structural ledger invariants; read-only.
+router.get('/reports/integrity', requireRole(...ROLE_ACCESS.ownerManager), (_req: Request, res: Response) => {
+  try {
+    res.json({ report: getIntegrityChecks() });
   } catch (error: unknown) {
     sendError(res, error);
   }

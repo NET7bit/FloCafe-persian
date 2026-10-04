@@ -35,7 +35,8 @@ import { fiscalDateForInstant } from './fiscal-periods';
 
 type Database = ReturnType<typeof getDatabase>;
 
-const COGS_ACCOUNT_CODE = '5100';
+/** Single ownership point for the COGS account; report classifiers reuse it instead of re-hardcoding. */
+export const COGS_ACCOUNT_CODE = '5100';
 const INVENTORY_ACCOUNT_CODE = '1200';
 
 interface OrderItemRow { id: number; order_id: string; status: string | null; }
