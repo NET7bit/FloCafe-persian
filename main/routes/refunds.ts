@@ -6,6 +6,7 @@ import { ROLE_ACCESS } from '../../shared/role-permissions';
 import { checkPinRateLimit } from './orders';
 import { createRefund, getTenantCurrency, RefundRequest } from '../services/refund';
 import { recordRefundAccounting } from '../services/accounting-sales-adapter';
+import { recordRefundCogsAccounting } from '../services/accounting-cogs-adapter';
 import { getCurrencyFractionDigits, getCurrencyMinorUnitFactor } from '../countries';
 
 const router = Router();
@@ -116,6 +117,7 @@ router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: R
     // Post-commit projection: the refund is durable above; accounting
     // failures are logged, never roll the refund back.
     recordRefundAccounting(result.refund?.id, userId);
+    recordRefundCogsAccounting(result.refund?.id, userId);
 
     res.status(201).json(result);
   } catch (error: any) {

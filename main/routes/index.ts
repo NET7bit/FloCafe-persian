@@ -61,6 +61,7 @@ import {
 import { calculateOrderTotals } from '../services/orders';
 import { adjustProductStock } from '../services/inventory';
 import { applyRecipeSnapshot, parseRecipeSnapshot } from '../services/recipes';
+import { recordItemCancelCogsAccounting, recordItemRestoreCogsAccounting } from '../services/accounting-cogs-adapter';
 import { cloudSync } from '../services/cloud-sync';
 import { parsePhoneE164, stripPhoneDigits } from '../lib/phone';
 import QRCode from 'qrcode';
@@ -341,6 +342,7 @@ export function registerRoutes(app: Express): void {
             items,
             orderCancelled: currentOrder.status === 'cancelled',
             eventType: null,
+            itemVoided: false,
           };
         }
 
@@ -550,12 +552,18 @@ export function registerRoutes(app: Express): void {
           items,
           orderCancelled,
           eventType: orderCancelled ? 'order.cancelled' : (isItemVoid ? 'order.item_voided' : 'order.item_cancelled'),
+          itemVoided: isItemVoid,
         };
       });
 
       if (result.eventType) {
         cloudSync.recordOrderChanged(orderId, result.eventType);
         notifyKdsUpdate();
+      }
+      // A cancel restores inventory, so its frozen COGS is reversed; a void
+      // does not restore inventory and leaves COGS untouched.
+      if (result.eventType && !result.itemVoided) {
+        recordItemCancelCogsAccounting(itemId, actorId);
       }
       res.json({ order: { ...result.updatedOrder, items: result.items } });
     } catch (error: any) {
@@ -718,6 +726,8 @@ export function registerRoutes(app: Express): void {
       if (result.changed) {
         cloudSync.recordOrderChanged(orderId, 'order.item_restored');
         notifyKdsUpdate();
+        // Restoring re-consumes inventory, so COGS is recognized again.
+        recordItemRestoreCogsAccounting(itemId, actorId);
       }
       res.json({ order: { ...result.updatedOrder, items: result.items } });
     } catch (error: any) {

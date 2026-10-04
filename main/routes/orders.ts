@@ -12,6 +12,7 @@ import {
 import { applyPayableRounding } from '../services/tax-engine';
 import { calculateOrderTotals } from '../services/orders';
 import { adjustProductStock, resolveInventoryDeduction } from '../services/inventory';
+import { recordOrderCancelCogsAccounting } from '../services/accounting-cogs-adapter';
 import { applyRecipeSnapshot, buildRecipeSnapshot, parseRecipeSnapshot } from '../services/recipes';
 import { notifyKdsUpdate, notifyOrderUpdated } from '../services/kds';
 import { cloudSync } from '../services/cloud-sync';
@@ -1185,6 +1186,11 @@ router.patch('/:id/status', orderWriteRateLimit, requireRole(...ROLE_ACCESS.orde
     if (changed) {
       cloudSync.recordOrderChanged(req.params.id as string, `order.${status}`);
       notifyKdsUpdate();
+    }
+
+    // A cancelled order restores inventory, so each item's frozen COGS is reversed.
+    if (changed && status === 'cancelled') {
+      recordOrderCancelCogsAccounting(req.params.id as string, String((req as any).user?.userId || ''));
     }
 
     res.json({ order: Object.assign({}, updatedOrder, { items: orderItems, table }) });

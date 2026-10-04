@@ -21,6 +21,10 @@ import {
   listUnresolvedExpenses,
   reprocessExpenseAccounting,
 } from '../services/accounting-expenses-adapter';
+import {
+  listUnresolvedCogsEvents,
+  reprocessCogsAccounting,
+} from '../services/accounting-cogs-adapter';
 
 const router = Router();
 
@@ -180,6 +184,28 @@ router.post('/expenses/:id/reprocess', requireRole(...ROLE_ACCESS.owner), (req: 
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
     res.json({ result: reprocessExpenseAccounting(String(req.params.id), actor) });
+  } catch (error: unknown) {
+    sendError(res, error);
+  }
+});
+
+// Read-only, derived list of order items whose COGS projection is missing or
+// incomplete (consumed without a journal, or refunded without a reversal).
+router.get('/cogs/unresolved', requireRole(...ROLE_ACCESS.ownerManager), (_req: Request, res: Response) => {
+  try {
+    res.json({ events: listUnresolvedCogsEvents() });
+  } catch (error: unknown) {
+    sendError(res, error);
+  }
+});
+
+// Explicitly completes the accounting projection for one order item; the item
+// id is the only client input, identity is server-derived.
+router.post('/cogs/:id/reprocess', requireRole(...ROLE_ACCESS.owner), (req: Request, res: Response) => {
+  try {
+    const actor = actorId(req);
+    if (!actor) return res.status(403).json({ error: 'Authentication required' });
+    res.json({ result: reprocessCogsAccounting(String(req.params.id), actor) });
   } catch (error: unknown) {
     sendError(res, error);
   }

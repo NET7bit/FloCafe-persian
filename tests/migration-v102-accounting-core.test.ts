@@ -77,9 +77,9 @@ async function main() {
   assert(lineIndexes.includes('idx_journal_entry_lines_journal'), 'line journal index exists');
   assert(lineIndexes.includes('idx_journal_entry_lines_account'), 'line account index exists');
 
-  // ── Seeded 12-account chart ──
+  // ── Seeded account chart (v102 seeds 12; later milestones add accounts) ──
   const accounts = db.prepare('SELECT code, name, type, normal_side, is_system, is_active FROM accounting_accounts ORDER BY code').all() as any[];
-  assertEqual(accounts.length, 12, 'exactly 12 accounts seeded');
+  assertEqual(accounts.length, 13, 'exactly 13 accounts seeded');
   const byCode = new Map(accounts.map((a: any) => [a.code, a]));
   const expected: Array<[string, string, string, string]> = [
     ['1000', 'Cash', 'asset', 'debit'],
@@ -93,6 +93,7 @@ async function main() {
     ['4010', 'Sales Returns', 'revenue', 'debit'],
     ['4020', 'Sales Discounts', 'revenue', 'debit'],
     ['5000', 'Operating Expenses', 'expense', 'debit'],
+    ['5100', 'Cost of Goods Sold', 'expense', 'debit'],
     ['5900', 'Cash Over/Short', 'expense', 'debit'],
   ];
   for (const [code, name, type, side] of expected) {
@@ -153,7 +154,7 @@ async function main() {
   let rerunFailed = false;
   try { v102.up(); v102.up(); } catch { rerunFailed = true; }
   assert(!rerunFailed, 're-running the migration is idempotent');
-  assertEqual((db.prepare('SELECT COUNT(*) AS n FROM accounting_accounts').get() as any).n, 12, 're-run preserves existing rows');
+  assertEqual((db.prepare('SELECT COUNT(*) AS n FROM accounting_accounts').get() as any).n, 13, 're-run preserves existing rows');
 
   // ── Prior v93–v101 tables survive ──
   const allTables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r: any) => r.name);
@@ -198,7 +199,7 @@ async function main() {
     `);
     legacy.pragma('user_version = 101');
     v102.up();
-    assertEqual(legacy.prepare('SELECT COUNT(*) AS n FROM accounting_accounts').get().n, 12, 'legacy upgrade seeded the 12-account chart');
+    assertEqual(legacy.prepare('SELECT COUNT(*) AS n FROM accounting_accounts').get().n, 13, 'legacy upgrade seeded the full account chart');
     assert(legacy.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='journal_entries'").get(), 'legacy upgrade created journal_entries');
     assertEqual(legacy.prepare('SELECT COUNT(*) AS n FROM suppliers').get().n, 1, 'legacy supplier data preserved');
     setDb(getDb());

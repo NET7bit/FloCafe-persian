@@ -5606,6 +5606,64 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
       }
     },
   },
+  {
+    version: 104,
+    name: 'add_cogs_accounting',
+    up: () => {
+      // Frozen cost snapshot columns stay nullable: movements written before
+      // this migration carry no cost and are deliberately excluded from COGS
+      // (activation is data-derived, never backfilled).
+      const movementColumns = getColumns(db, 'supply_movements');
+      if (!movementColumns.includes('unit_cost')) {
+        db.exec(`ALTER TABLE supply_movements ADD COLUMN unit_cost REAL`);
+      }
+      if (!movementColumns.includes('total_cost')) {
+        db.exec(`ALTER TABLE supply_movements ADD COLUMN total_cost REAL`);
+      }
+
+      // SQLite cannot ALTER a column CHECK constraint; rebuild journal_entries
+      // so the COGS source identity can be stored natively.
+      const journalIndexes = (db.prepare(`
+        SELECT name, sql FROM sqlite_master
+        WHERE type = 'index' AND tbl_name = 'journal_entries' AND sql IS NOT NULL
+      `).all() as { name: string; sql: string }[])
+        .filter((index) => index.name.startsWith('idx_journal_entries_'));
+      db.exec(`
+        PRAGMA foreign_keys = OFF;
+        CREATE TABLE journal_entries_v104_migration (
+          id TEXT PRIMARY KEY,
+          entry_date TEXT NOT NULL,
+          description TEXT,
+          source_module TEXT NOT NULL CHECK (source_module IN ('sales', 'refunds', 'receivables', 'purchases', 'supplier_payments', 'purchase_returns', 'expenses', 'manual', 'opening_balance', 'cogs')),
+          source_id TEXT,
+          seq INTEGER NOT NULL DEFAULT 1,
+          reference TEXT,
+          status TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('posted', 'reversed')),
+          reverses_journal_id TEXT REFERENCES journal_entries(id),
+          created_by TEXT REFERENCES users(id),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (source_module, source_id, seq)
+        );
+        INSERT INTO journal_entries_v104_migration (
+          id, entry_date, description, source_module, source_id, seq, reference, status, reverses_journal_id, created_by, created_at
+        )
+        SELECT id, entry_date, description, source_module, source_id, seq, reference, status, reverses_journal_id, created_by, created_at
+        FROM journal_entries;
+        DROP TABLE journal_entries;
+        ALTER TABLE journal_entries_v104_migration RENAME TO journal_entries;
+        PRAGMA foreign_keys = ON;
+      `);
+      for (const index of journalIndexes) {
+        db.exec(index.sql);
+      }
+
+      // COGS account: the expense side of the inventory-to-cost transfer.
+      db.prepare(`
+        INSERT OR IGNORE INTO accounting_accounts (id, code, name, type, normal_side, is_system, is_active)
+        VALUES ('acct_5100', '5100', 'Cost of Goods Sold', 'expense', 'debit', 1, 1)
+      `).run();
+    },
+  },
 ];
 
 function syncBackupBeforeMigration(fromVersion: number, toVersion: number): void {

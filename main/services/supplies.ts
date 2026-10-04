@@ -260,12 +260,23 @@ export function applySupplyStockChange(
   if (!Number.isFinite(costPrice) || costPrice < 0) costPrice = 0;
   const pricedInflow = options.unitCost !== undefined && options.unitCost !== null
     && Number.isFinite(Number(options.unitCost)) && Number(options.unitCost) > 0;
+  let unitCostInBase = costPrice;
+  if (pricedInflow) {
+    unitCostInBase = Number(options.unitCost) / convertQuantity(1, unit, supply.base_unit);
+  }
   if (pricedInflow && deltaInBase > 0 && stockBefore >= 0 && stockAfter > 0) {
-    const unitCostInBase = Number(options.unitCost) / convertQuantity(1, unit, supply.base_unit);
     const incomingValue = roundQuantity(unitCostInBase * deltaInBase);
     const onHandValue = roundQuantity(costPrice * Math.max(stockBefore, 0));
     costPrice = roundQuantity((onHandValue + incomingValue) / stockAfter);
   }
+
+  // Frozen cost snapshot: a priced inflow freezes its purchase price per base
+  // unit, otherwise the weighted average at this movement. `total_cost` is
+  // signed (unit_cost × quantity_delta), so an item's net consumption is the
+  // negated sum of the movements that reference it. Pre-migration movements
+  // stay NULL and take no part in COGS.
+  const frozenUnitCost = roundQuantity(unitCostInBase);
+  const frozenTotalCost = roundQuantity(frozenUnitCost * deltaInBase);
 
   db.prepare('UPDATE supplies SET stock_quantity = ?, cost_price = ?, updated_at = ? WHERE id = ?')
     .run(stockAfter, costPrice, timestamp, options.supplyId);
@@ -273,8 +284,9 @@ export function applySupplyStockChange(
   const movement = db.prepare(`
     INSERT INTO supply_movements (
       supply_id, quantity_delta, movement_type, unit, stock_after,
-      reason, actor_user_id, reference_type, reference_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      reason, actor_user_id, reference_type, reference_id, created_at,
+      unit_cost, total_cost
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     options.supplyId,
     deltaInBase,
@@ -286,6 +298,8 @@ export function applySupplyStockChange(
     options.referenceType ?? null,
     options.referenceId === null || options.referenceId === undefined ? null : String(options.referenceId),
     timestamp,
+    frozenUnitCost,
+    frozenTotalCost,
   );
 
   return { stockBefore, stockAfter, costPrice, movementId: Number(movement.lastInsertRowid) };

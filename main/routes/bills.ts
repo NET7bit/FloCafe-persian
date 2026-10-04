@@ -30,6 +30,7 @@ import { applyPayableRounding } from '../services/tax-engine';
 import { calculateOrderTotals } from '../services/orders';
 import { createReceivableEntry } from '../services/receivables';
 import { recordBillPaymentAccounting } from '../services/accounting-sales-adapter';
+import { recordBillCogsAccounting } from '../services/accounting-cogs-adapter';
 import { sendEvent } from '../services/telemetry';
 import {
   getCurrencyFractionDigits,
@@ -2088,6 +2089,7 @@ router.post('/:id/payment', requireRole(...ROLE_ACCESS.ownerManagerCashier), (re
     // Post-commit projection: the payment is durable above; accounting
     // failures are logged, never roll the bill back.
     recordBillPaymentAccounting(req.params.id as string, String((req as any).user.userId));
+    recordBillCogsAccounting(req.params.id as string, String((req as any).user.userId));
 
     const billStatus = (result.bill as any)?.payment_status;
     if (billStatus === 'paid') notifyKdsUpdate();
@@ -2123,6 +2125,7 @@ router.post('/:id/payments', requireRole(...ROLE_ACCESS.ownerManagerCashier), (r
     // Post-commit projection: the payment is durable above; accounting
     // failures are logged, never roll the bill back.
     recordBillPaymentAccounting(req.params.id as string, String((req as any).user.userId));
+    recordBillCogsAccounting(req.params.id as string, String((req as any).user.userId));
 
     const billStatus = (result.bill as any)?.payment_status;
     if (billStatus === 'paid') notifyKdsUpdate();

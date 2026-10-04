@@ -30,7 +30,7 @@ export interface JournalLineInput {
 export interface CreateJournalInput {
   entryDate: string;
   description?: string | null;
-  sourceModule: 'sales' | 'refunds' | 'receivables' | 'purchases' | 'supplier_payments' | 'purchase_returns' | 'expenses' | 'manual' | 'opening_balance';
+  sourceModule: 'sales' | 'refunds' | 'receivables' | 'purchases' | 'supplier_payments' | 'purchase_returns' | 'expenses' | 'cogs' | 'manual' | 'opening_balance';
   sourceId?: string | null;
   seq?: number;
   reference?: string | null;
@@ -64,7 +64,7 @@ export interface JournalRecord {
   created_at: string;
 }
 
-const SOURCE_MODULES = ['sales', 'refunds', 'receivables', 'purchases', 'supplier_payments', 'purchase_returns', 'expenses', 'manual', 'opening_balance'] as const;
+const SOURCE_MODULES = ['sales', 'refunds', 'receivables', 'purchases', 'supplier_payments', 'purchase_returns', 'expenses', 'cogs', 'manual', 'opening_balance'] as const;
 
 function newId(prefix: string): string {
   return `${prefix}_${randomBytes(12).toString('hex')}`;

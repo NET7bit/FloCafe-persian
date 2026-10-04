@@ -287,7 +287,7 @@ async function main() {
       { accountId: equity.id, amount: -100 },
     ],
   }), 'opening rejects unknown accounts (no account is created)');
-  assertEqual((db.prepare('SELECT COUNT(*) AS n FROM accounting_accounts').get() as any).n, 12, 'the CoA still holds exactly the 12 seeded accounts');
+  assertEqual((db.prepare('SELECT COUNT(*) AS n FROM accounting_accounts').get() as any).n, 13, 'the CoA still holds exactly the 13 seeded accounts');
   expectError(400, () => createManualJournal({
     entryDate: TODAY, idempotencyKey: new Array(129).fill('a').join(''), actorUserId: owner.userId,
     lines: [

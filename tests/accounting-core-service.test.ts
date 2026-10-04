@@ -63,7 +63,7 @@ async function main() {
   const revenue = getAccountByCode('4000');
   const returns = getAccountByCode('4010');
 
-  assertEqual(listAccounts().length, 12, '12 seeded accounts are listed');
+  assertEqual(listAccounts().length, 13, '13 seeded accounts are listed');
   assert(listAccounts({ activeOnly: true }).every((a: any) => a.is_active === 1), 'activeOnly filters inactive accounts');
 
   // ── Balanced journal succeeds ──
