@@ -53,6 +53,13 @@ function expectError(statusCode: number, fn: () => void, message: string): void 
   }
 }
 
+/** SQLite-format (`YYYY-MM-DD HH:MM:SS`, UTC) timestamp shifted by whole seconds. */
+function secondsAfter(timestamp: string, seconds: number): string {
+  const date = new Date(`${timestamp.replace(' ', 'T')}Z`);
+  date.setUTCSeconds(date.getUTCSeconds() + seconds);
+  return date.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+}
+
 const TODAY = new Date().toISOString().slice(0, 10);
 const LAST_MONTH = (() => {
   const d = new Date();
@@ -185,13 +192,23 @@ async function main() {
   assertEqual(createSaleJournal(closedBill, owner.userId), null, 'a sale journal for a bill dated in a closed period is not created');
   assertEqual(journalsFor('sales', closedBill).length, 0, 'closed-period sale wrote no journal');
 
+  // ── Timestamp helper: strictly monotonic for every second of the minute ──
+  assertEqual(secondsAfter('2026-10-05 07:28:56', 5), '2026-10-05 07:29:01', 'a second event crosses the minute boundary forward');
+  assertEqual(secondsAfter('2026-10-05 23:59:58', 5), '2026-10-06 00:00:03', 'a second event crosses midnight forward');
+  let nonMonotonic = 0;
+  for (let s = 0; s < 60; s += 1) {
+    const base = `2026-10-05 07:28:${String(s).padStart(2, '0')}`;
+    if (secondsAfter(base, 5) <= base) nonMonotonic += 1;
+  }
+  assertEqual(nonMonotonic, 0, 'the later event is strictly later for all 60 seconds of a minute');
+
   // ── Collection: 10. cash ──
   const collectBill = insertBill(insertOrder(1000, 0), 1000, 0);
   const firstAt = now();
   const saleBatch = randomUUID();
   setPaymentDetails(collectBill, 1000, [payLine('cash', 400, firstAt, saleBatch)]);
   createSaleJournal(collectBill, owner.userId);
-  const laterEvent = payLine('cash', 300, firstAt.replace(/(\d\d)$/, (s) => String((Number(s) + 5) % 60).padStart(2, '0')));
+  const laterEvent = payLine('cash', 300, secondsAfter(firstAt, 5));
   setPaymentDetails(collectBill, 1000, [payLine('cash', 400, firstAt, saleBatch), laterEvent]);
   recordBillPaymentAccounting(collectBill, owner.userId);
   const saleRows = journalsFor('sales', collectBill);
@@ -202,13 +219,29 @@ async function main() {
   expectLines(collection.id, [['1000', 'debit', 300], ['1100', 'credit', 300]], 'cash collection maps Dr 1000 / Cr 1100');
   assertEqual(collection.entry_date, fiscalDateForInstant(laterEvent.timestamp), 'collection is dated at the payment event, not the bill');
 
+  // ── Collection: 10b. minute boundary (the later payment lands in the next minute) ──
+  const boundaryFirstAt = `${TODAY} 07:28:56`;
+  const boundaryLaterAt = secondsAfter(boundaryFirstAt, 5);
+  assertEqual(boundaryLaterAt, `${TODAY} 07:29:01`, 'the boundary scenario really crosses the minute');
+  const boundaryBill = insertBill(insertOrder(700, 0, null, boundaryFirstAt), 700, 0, null, boundaryFirstAt);
+  const boundarySaleBatch = randomUUID();
+  setPaymentDetails(boundaryBill, 700, [payLine('cash', 400, boundaryFirstAt, boundarySaleBatch)]);
+  createSaleJournal(boundaryBill, owner.userId);
+  const boundaryEvent = payLine('cash', 300, boundaryLaterAt);
+  setPaymentDetails(boundaryBill, 700, [payLine('cash', 400, boundaryFirstAt, boundarySaleBatch), boundaryEvent]);
+  recordBillPaymentAccounting(boundaryBill, owner.userId);
+  const boundaryRows = journalsFor('sales', String(boundaryBill));
+  assertEqual(boundaryRows.length, 2, 'the minute-boundary payment projects exactly one collection journal');
+  assertEqual(boundaryRows[1].reference, boundaryEvent.event_id, 'the minute-boundary collection belongs to the newer payment event');
+  expectLines(boundaryRows[1].id, [['1000', 'debit', 300], ['1100', 'credit', 300]], 'the minute-boundary collection keeps its tender mapping');
+
   // ── Collection: 11. card ──
   const cardCollectBill = insertBill(insertOrder(900, 0), 900, 0);
   const firstAt2 = now();
   const cardSaleBatch = randomUUID();
   setPaymentDetails(cardCollectBill, 900, [payLine('cash', 400, firstAt2, cardSaleBatch)]);
   createSaleJournal(cardCollectBill, owner.userId);
-  const cardEvent = payLine('card', 500, firstAt2.replace(/(\d\d)$/, (s) => String((Number(s) + 5) % 60).padStart(2, '0')));
+  const cardEvent = payLine('card', 500, secondsAfter(firstAt2, 5));
   setPaymentDetails(cardCollectBill, 900, [payLine('cash', 400, firstAt2, cardSaleBatch), cardEvent]);
   recordBillPaymentAccounting(cardCollectBill, owner.userId);
   const cardCollection: any = journalsFor('sales', cardCollectBill)[1];
