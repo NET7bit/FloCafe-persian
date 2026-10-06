@@ -60,6 +60,7 @@ npm run dev              # Full Electron app (cleans ports, builds frontend & ba
 node dev-server.js       # Backend only (Express API on :3001, KDS on :3002, Server App on :3003)
 npm run dev:frontend     # Frontend browser development server
 npm run lint             # Lint backend (main/) and frontend (frontend/)
+npm run typecheck:tests  # Tests TypeScript ratchet (fails only on new errors)
 npm run build            # Compile TypeScript backend to dist/
 npm run build:frontend   # Build and export static Next.js frontend
 npm test                 # Run standard test suite

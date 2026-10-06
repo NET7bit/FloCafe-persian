@@ -45,3 +45,6 @@ code-review/
 # Private shared docs repo — cloned in by hand, never tracked here (see AGENTS.md)
 specs/
 test-results/
+
+# Local agent/tool session metadata (e.g. Codebuff project id) — never commit
+.freebuff/

@@ -121,6 +121,9 @@ jobs:
       - name: Lint warning budget
         run: npm run lint:budget
 
+      - name: Tests TypeScript budget
+        run: npm run typecheck:tests
+
       - name: Build frontend
         run: cd frontend && npx cross-env NEXT_BUILD_MODE=desktop npm run build
         env:

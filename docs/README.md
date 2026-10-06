@@ -47,12 +47,16 @@ This index classifies documentation in `docs/` so contributors and AI agents kno
 | [cloud-v2-plan.md](cloud-v2-plan.md) | Client integration plan for FloAdmin v2 cloud coordination. Phase 1 client work is implemented in code; forward-looking multi-device sync and FloAdmin contracts remain in design/specs. | ACTIVE DESIGN / FORWARD-LOOKING |
 | [regional-snapshot.md](regional-snapshot.md) | One backend `resolveRegionalSnapshot(settings)` resolver for country, currency symbol/position/fraction digits, locale separators, and business timezone, derived from the signup country/currency via `Intl`/ISO/IANA conventions with no default country and no per-store overrides; adopted by exactly two surfaces (server app, currency input/display) with contract tests per currency archetype. Prerequisite for the #693 reimplementation; supersedes PR #697. | ACTIVE DESIGN |
 | [printing-nonlatin-capabilities.md](printing-nonlatin-capabilities.md) | Capability study and decision record for non-Latin scripts (Arabic/Persian, Hebrew, CJK, Indic) on ESC/POS hardware: approach comparison, Phase 9 capability-gated raster contract, community hardware-test matrix, and diagnostic test-page probe. Broad coverage remains hardware/font-evidence gated. | CURRENT / FORWARD-LOOKING |
+| [accounting-architecture-plan.md](accounting-architecture-plan.md) | Accounting v1 architecture (approved stages 2–5): seeded chart of accounts, append-only `journal_entries`/`journal_entry_lines` with derived balances, fiscal-gated insert paths reusing v101, module adapters for the untouched sales core, reports/reconciliation, and the accounting UI. Landed through migration v104; its COGS deferral is superseded by v104, and the adapter ownership boundaries reference this plan. | ACTIVE DESIGN |
 
 ### Historical records
 
 | Document | Description | Status |
 | --- | --- | --- |
 | [security-audit-2.7.0.md](security-audit-2.7.0.md) | Security audit report for FloCafe v2.7.0 dated 2026-08-04. | HISTORICAL |
+| [accounting-current-state.md](accounting-current-state.md) | Inspect-only survey (design stage 2, HEAD `c8308f8`) of the pre-accounting money model: legacy sales core vs the v93–v101 financial modules, with a repository evidence table. | HISTORICAL |
+| [accounting-milestone-plan.md](accounting-milestone-plan.md) | Planning-only milestone plan (design stage 5) for Accounting v1; delivered through the accounting implementation stages (v102–v104). | HISTORICAL |
+| [accounting-scope-review.md](accounting-scope-review.md) | Scope boundary review (design stage 4) splitting accounting capabilities into v1 / later / out of scope. | HISTORICAL |
 
 ---
 
