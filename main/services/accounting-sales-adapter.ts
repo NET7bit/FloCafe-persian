@@ -53,6 +53,17 @@ function parsePaymentLines(raw: unknown): ParsedPaymentLine[] {
     }));
 }
 
+/**
+ * The sale journal consumes the first applied payment batch. `payment_details`
+ * is append-ordered by commit, so the first batch id in line order is stable
+ * across replays and identical for the sale journal and the collection hook;
+ * timestamps are never compared (same-second payments tie) and batch ids are
+ * never sorted (they are random UUIDs, not an ordering).
+ */
+function saleBatchIdOf(lines: ParsedPaymentLine[]): string | null {
+  return lines.find((line) => line.batchId !== null)?.batchId ?? null;
+}
+
 /** Tenders with a v1 chart account; anything else (wallet/custom) is skipped. */
 const ACCOUNTED_TENDER_METHODS = new Set(['cash', 'card', 'customer_account']);
 
@@ -133,10 +144,7 @@ export function createSaleJournal(billId: string | number, actorUserId: string):
     if (lines.some((line) => line.method && !ACCOUNTED_TENDER_METHODS.has(line.method))) {
       return skip(`sale journal for bill ${bill.id}: unaccounted tender (wallet/custom)`);
     }
-    const saleBatchId = lines
-      .map((line) => line.batchId)
-      .filter((id): id is string => id !== null)
-      .sort()[0] ?? null;
+    const saleBatchId = saleBatchIdOf(lines);
     const saleTenders = lines.filter((line) => line.batchId !== null && line.batchId === saleBatchId);
     if (saleTenders.length === 0) return null;
     const minorFactor = tenantMinorFactor(db);
@@ -291,17 +299,16 @@ export function recordBillPaymentAccounting(billId: string | number | null | und
     }
     const accounted = lines.filter((line) => line.eventId);
     if (accounted.length === 0) return;
-    // The earliest batch is the sale; its tenders live inside the sale
-    // journal, so only later batches can become collections. Ordering is
-    // deterministic: earliest timestamp, then smallest batch id.
-    const saleBatchId = accounted
-      .slice()
-      .sort((a, b) => (a.timestamp ?? '').localeCompare(b.timestamp ?? '') || (a.batchId ?? '').localeCompare(b.batchId ?? ''))
-      .map((line) => line.batchId)
-      .find((id): id is string => id !== null) ?? null;
+    // The first applied batch is the sale; its tenders live inside the sale
+    // journal, so every later batch projects its own collection under its own
+    // event_id. No timestamp or batch-id ordering is involved.
+    const saleBatchId = saleBatchIdOf(lines);
     if (!existingSaleJournal(db, bill.id)) {
       createSaleJournal(bill.id, actorUserId);
-      return;
+      // A late-created sale journal (first attempt hit a closed period) must
+      // still project the batches that arrived meanwhile, so one reprocess
+      // call finishes the bill instead of only its seq 1.
+      if (!existingSaleJournal(db, bill.id)) return;
     }
     for (const line of accounted) {
       if (line.batchId !== null && line.batchId === saleBatchId) continue;

@@ -127,6 +127,25 @@ async function main() {
     assertEqual(JSON.stringify(actual), JSON.stringify(expected), message);
   }
 
+  const tenderDebitSum = (id: number) => {
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(l.amount), 0) AS total FROM journal_entry_lines l
+      JOIN accounting_accounts a ON a.id = l.account_id
+      WHERE l.journal_id IN (SELECT id FROM journal_entries WHERE source_module = 'sales' AND source_id = ?)
+        AND a.code IN ('1000', '1010') AND l.direction = 'debit'
+    `).get(String(id)) as any;
+    return Number(row.total);
+  };
+  const arNet = (id: number) => {
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(CASE WHEN l.direction = 'debit' THEN l.amount ELSE -l.amount END), 0) AS net
+      FROM journal_entry_lines l JOIN accounting_accounts a ON a.id = l.account_id
+      WHERE l.journal_id IN (SELECT id FROM journal_entries WHERE source_module = 'sales' AND source_id = ?)
+        AND a.code = '1100'
+    `).get(String(id)) as any;
+    return Number(row.net);
+  };
+
   // ── Sale: 1. cash ──
   let bill = insertBill(insertOrder(500, 0), 500, 0);
   setPaymentDetails(bill, 500, [payLine('cash', 500)]);
@@ -254,6 +273,50 @@ async function main() {
   createCollectionJournal(collectBill, laterEvent.event_id, owner.userId);
   assertEqual(journalsFor('sales', collectBill).length, 2, 'the collection identity (source_id + reference) is UNIQUE-enforced on replay');
 
+  // ── Collection: 12b. two payments in one second (identity is the event) ──
+  // Adversarial batch ids: the second batch sorts before the sale batch and both
+  // events share one timestamp — the shape that previously let the collection
+  // hook consume a different batch than the sale journal already held.
+  const tieBill = insertBill(insertOrder(500, 0), 500, 0);
+  const tieAt = now();
+  const tieFirst = payLine('cash', 250, tieAt, 'ffffffff-ffff-4fff-8fff-ffffffffffff');
+  setPaymentDetails(tieBill, 500, [tieFirst]);
+  const tieSale: any = createSaleJournal(tieBill, owner.userId);
+  expectLines(tieSale.id, [['1000', 'debit', 250], ['1100', 'debit', 250], ['4000', 'credit', 500]],
+    'same-second sale debits the first batch tender plus the AR remainder');
+  const tieSecond = payLine('cash', 250, tieAt, '00000000-0000-4000-8000-000000000000');
+  setPaymentDetails(tieBill, 500, [tieFirst, tieSecond]);
+  recordBillPaymentAccounting(tieBill, owner.userId);
+  const tieRows = journalsFor('sales', String(tieBill));
+  assertEqual(tieRows.length, 2, 'two same-second payments produce the sale plus exactly one collection');
+  assertEqual(tieRows[1].reference, tieSecond.event_id, 'the collection carries the second payment event identity');
+  expectLines(tieRows[1].id, [['1000', 'debit', 250], ['1100', 'credit', 250]], 'the same-second collection maps Dr tender / Cr AR');
+  assertEqual(tenderDebitSum(tieBill), 500, 'tender debits equal the amounts actually collected (nothing double posted)');
+  assertEqual(arNet(tieBill), 0, 'AR nets to zero once both same-second payments are journalized');
+
+  // ── Collection: 12c. three payments in one second ──
+  const trioBill = insertBill(insertOrder(500, 0), 500, 0);
+  const trioAt = now();
+  const trioLines = [payLine('cash', 100, trioAt, 'ffffffff-ffff-4fff-8fff-ffffffffffff')];
+  setPaymentDetails(trioBill, 500, trioLines);
+  createSaleJournal(trioBill, owner.userId);
+  trioLines.push(
+    payLine('cash', 150, trioAt, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'),
+    payLine('cash', 250, trioAt, '00000000-0000-4000-8000-000000000000'),
+  );
+  setPaymentDetails(trioBill, 500, trioLines);
+  recordBillPaymentAccounting(trioBill, owner.userId);
+  const trioRows = journalsFor('sales', String(trioBill));
+  assertEqual(trioRows.length, 3, 'three same-second payments produce the sale plus two collections');
+  assertEqual(trioRows[1].reference, trioLines[1].event_id, 'the first collection carries the second payment event identity');
+  assertEqual(trioRows[2].reference, trioLines[2].event_id, 'the second collection carries the third payment event identity');
+  expectLines(trioRows[1].id, [['1000', 'debit', 150], ['1100', 'credit', 150]], 'the second payment is journalized once, under its own journal');
+  expectLines(trioRows[2].id, [['1000', 'debit', 250], ['1100', 'credit', 250]], 'the third payment is journalized once, under its own journal');
+  assertEqual(tenderDebitSum(trioBill), 500, 'three same-second payments debit the tenders once each');
+  assertEqual(arNet(trioBill), 0, 'AR nets to zero after three same-second payments');
+  recordBillPaymentAccounting(trioBill, owner.userId);
+  assertEqual(journalsFor('sales', String(trioBill)).length, 3, 'replaying the hook after same-second payments creates no duplicate');
+
   // ── Collection: 13. closed period (sale predates the closed month) ──
   const fiveMonthsAgoTs = (() => {
     const d = new Date();
@@ -309,6 +372,17 @@ async function main() {
   assertEqual(createRefundJournal(closedRefundId, owner.userId), null, 'a refund dated in a closed period is not created');
   assertEqual(journalsFor('refunds', closedRefundId).length, 0, 'closed-period refund wrote no journal');
 
+  // ── Collection: 20b. two same-second payments in a closed period ──
+  const closedTieBill = insertBill(insertOrder(500, 0, null, lastMonthTs), 500, 0, null, lastMonthTs);
+  const closedTieFirst = payLine('cash', 250, lastMonthTs, 'ffffffff-ffff-4fff-8fff-ffffffffffff');
+  const closedTieSecond = payLine('cash', 250, lastMonthTs, '00000000-0000-4000-8000-000000000000');
+  setPaymentDetails(closedTieBill, 500, [closedTieFirst, closedTieSecond]);
+  assertEqual(createSaleJournal(closedTieBill, owner.userId), null, 'a closed-period sale with two same-second payments writes no sale journal');
+  recordBillPaymentAccounting(closedTieBill, owner.userId);
+  assertEqual(journalsFor('sales', String(closedTieBill)).length, 0, 'the closed-period hook writes no journal for either same-second payment');
+  assertEqual((db.prepare('SELECT payment_status, paid_amount FROM bills WHERE id = ?').get(closedTieBill) as any).payment_status, 'paid',
+    'the fiscal rejection leaves the committed source bill intact (A invariant)');
+
   // ── 21/22. post-commit failures never touch the source documents ──
   assertEqual((db.prepare('SELECT payment_status, paid_amount FROM bills WHERE id = ?').get(closedBill) as any).payment_status, 'paid', 'the closed-period bill survived the adapter failure intact');
   assertEqual(Number((db.prepare('SELECT amount_cents FROM refunds WHERE id = ?').get(closedRefundId) as any).amount_cents), 2000, 'the closed-period refund survived the adapter failure intact');
@@ -328,6 +402,21 @@ async function main() {
   const reprocessedCollection: any = journalsFor('sales', closedCollectionBill)[1];
   assert(!!reprocessedCollection, 'reprocessing after the reopen creates the collection journal');
   assertEqual(reprocessedCollection.entry_date, LAST_MONTH, 'reprocessed collection keeps the payment event date');
+
+  // ── 20c. reopen + reprocess: each same-second payment keeps its own identity ──
+  recordBillPaymentAccounting(closedTieBill, owner.userId);
+  const closedTieRows = journalsFor('sales', String(closedTieBill));
+  assertEqual(closedTieRows.length, 2, 'after the reopen the pair projects the sale journal plus one collection');
+  assertEqual(closedTieRows[0].seq, 1, 'the reprocessed sale keeps seq 1');
+  expectLines(closedTieRows[0].id, [['1000', 'debit', 250], ['1100', 'debit', 250], ['4000', 'credit', 500]],
+    'the reprocessed sale carries the first payment tender plus the AR remainder');
+  assertEqual(closedTieRows[1].seq, 2, 'the second same-second payment gets its own collection at seq 2');
+  assertEqual(closedTieRows[1].reference, closedTieSecond.event_id, 'the reprocessed collection carries the second payment event identity');
+  expectLines(closedTieRows[1].id, [['1000', 'debit', 250], ['1100', 'credit', 250]], 'the reprocessed collection maps Dr tender / Cr AR');
+  assertEqual(tenderDebitSum(closedTieBill), 500, 'the reprocessed pair debits both payments exactly once');
+  assertEqual(arNet(closedTieBill), 0, 'the reprocessed pair leaves no AR behind');
+  recordBillPaymentAccounting(closedTieBill, owner.userId);
+  assertEqual(journalsFor('sales', String(closedTieBill)).length, 2, 'replaying the reprocess creates no duplicate journal');
 
   const reprocessedRefund: any = createRefundJournal(closedRefundId, owner.userId);
   assert(!!reprocessedRefund, 'reprocessing after the reopen creates the refund journal');
@@ -407,6 +496,56 @@ async function main() {
   const liveRefund = journalsFor('refunds', liveRefundId)[0];
   assert(!!liveRefund, 'the post-commit hook produced the refund journal on the real path');
   expectLines(liveRefund.id, [['4010', 'debit', 20], ['1000', 'credit', 20]], 'the real-path refund maps Dr 4010 / Cr 1000');
+  // ── Real HTTP path: same-second payments keep one identity per event ──
+  let httpTieResult: any = null;
+  for (let attempt = 0; attempt < 5 && !httpTieResult; attempt += 1) {
+    const tieHttpBill = insertBill(insertOrder(500, 0), 500, 0);
+    for (const amount of [250, 250]) {
+      const res = await api(baseUrl, `/api/bills/${tieHttpBill}/payment`, {
+        method: 'POST', headers: owner.authHeader, body: { method: 'cash', amount },
+      });
+      assertEqual(res.status, 200, `same-second HTTP pair: payment ${amount} accepted`);
+    }
+    const parsed = JSON.parse((db.prepare('SELECT payment_details FROM bills WHERE id = ?').get(tieHttpBill) as any).payment_details);
+    if (new Set(parsed.map((line: any) => line.timestamp)).size === 1) {
+      httpTieResult = { billId: tieHttpBill, lines: parsed, journals: journalsFor('sales', String(tieHttpBill)) };
+    }
+  }
+  assert(!!httpTieResult, 'two HTTP payments landed inside one second (same-second precondition)');
+  const httpTie = httpTieResult;
+  assertEqual(httpTie.journals.length, 2, 'HTTP same-second pair: sale plus one collection');
+  assertEqual(httpTie.journals[1].reference, httpTie.lines[1].event_id, 'HTTP same-second pair: the collection belongs to the second payment event');
+  expectLines(httpTie.journals[1].id, [['1000', 'debit', 250], ['1100', 'credit', 250]], 'HTTP same-second pair maps Dr tender / Cr AR');
+  assertEqual(tenderDebitSum(httpTie.billId), 500, 'HTTP same-second pair debits both payments exactly once');
+  assertEqual(arNet(httpTie.billId), 0, 'HTTP same-second pair leaves no AR behind');
+  assertEqual((db.prepare('SELECT payment_status FROM bills WHERE id = ?').get(httpTie.billId) as any).payment_status, 'paid', 'HTTP same-second pair settled the bill');
+
+  let httpTrioResult: any = null;
+  for (let attempt = 0; attempt < 5 && !httpTrioResult; attempt += 1) {
+    const trioHttpBill = insertBill(insertOrder(500, 0), 500, 0);
+    for (const amount of [100, 150, 250]) {
+      const res = await api(baseUrl, `/api/bills/${trioHttpBill}/payment`, {
+        method: 'POST', headers: owner.authHeader, body: { method: 'cash', amount },
+      });
+      assertEqual(res.status, 200, `same-second HTTP trio: payment ${amount} accepted`);
+    }
+    const parsed = JSON.parse((db.prepare('SELECT payment_details FROM bills WHERE id = ?').get(trioHttpBill) as any).payment_details);
+    if (new Set(parsed.map((line: any) => line.timestamp)).size === 1) {
+      httpTrioResult = { billId: trioHttpBill, lines: parsed, journals: journalsFor('sales', String(trioHttpBill)) };
+    }
+  }
+  assert(!!httpTrioResult, 'three HTTP payments landed inside one second (same-second precondition)');
+  const httpTrio = httpTrioResult;
+  assertEqual(httpTrio.journals.length, 3, 'HTTP same-second trio: sale plus two collections');
+  assertEqual(httpTrio.journals[1].reference, httpTrio.lines[1].event_id, 'HTTP trio: the second payment has its own collection identity');
+  assertEqual(httpTrio.journals[2].reference, httpTrio.lines[2].event_id, 'HTTP trio: the third payment has its own collection identity');
+  expectLines(httpTrio.journals[1].id, [['1000', 'debit', 150], ['1100', 'credit', 150]], 'HTTP trio: the second payment amount is journalized once');
+  expectLines(httpTrio.journals[2].id, [['1000', 'debit', 250], ['1100', 'credit', 250]], 'HTTP trio: the third payment amount is journalized once');
+  assertEqual(tenderDebitSum(httpTrio.billId), 500, 'HTTP trio debits all three payments exactly once');
+  assertEqual(arNet(httpTrio.billId), 0, 'HTTP trio leaves no AR behind');
+  recordBillPaymentAccounting(httpTrio.billId, owner.userId);
+  assertEqual(journalsFor('sales', String(httpTrio.billId)).length, 3, 'HTTP trio replay creates no duplicate collection');
+
   server.close();
 
   // ── 30. no persistent retry/pending state ──
