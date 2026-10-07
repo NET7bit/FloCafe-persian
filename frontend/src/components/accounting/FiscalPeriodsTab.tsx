@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Ltr } from '@/components/layout/Ltr';
 import { useAuthStore } from '@/store/auth';
 import { businessDateInTimezone } from '@/lib/business-date';
+import { isDateInClosedPeriod } from '@/lib/fiscal-periods';
 import type { FiscalPeriod } from '@/lib/accounting';
 import { AccountingEmpty, AccountingError, AccountingLoading, StatusBadge } from './shared';
 
@@ -34,7 +35,7 @@ export default function FiscalPeriodsTab({ periods, loading, error, onRefresh }:
   const currentPeriod = periods.find(
     (period) => period.start_date <= businessDate && period.end_date >= businessDate,
   ) || null;
-  const postable = currentPeriod?.status === 'open';
+  const postable = !isDateInClosedPeriod(periods, businessDate);
 
   if (loading) return <AccountingLoading />;
   if (error) return <AccountingError message={error} />;

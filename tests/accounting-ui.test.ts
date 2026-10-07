@@ -16,6 +16,9 @@
  *   4. The accounting screens use logical direction utilities (RTL-safe) and
  *      every static `accounting.*` label they reference is defined in en.json.
  *   5. The sidebar exposes the accounting entry to owner/manager only.
+ *   6. The fiscal-period badge mirrors the backend gate: only a covering
+ *      `closed` period blocks posting, an uncovered business date stays
+ *      postable.
  *
  * Run: npm run test:accounting-ui
  */
@@ -31,6 +34,7 @@ const SIDEBAR_FILE = path.join(ROOT, 'frontend/src/components/layout/Sidebar.tsx
 const MESSAGES_FILE = path.join(ROOT, 'frontend/src/lib/i18n/messages/en.json');
 const ROUTES_ACCOUNTING = path.join(ROOT, 'main/routes/accounting.ts');
 const ROUTES_FISCAL = path.join(ROOT, 'main/routes/fiscal-periods.ts');
+const LIB_FISCAL_PERIODS = path.join(ROOT, 'frontend/src/lib/fiscal-periods.ts');
 
 const SECTION_FILES = [
   'shared.tsx',
@@ -177,6 +181,28 @@ function run(): void {
   assert(Boolean(navEntry), 'sidebar has no /accounting navigation entry');
   assert(navEntry!.includes('ROLE_ACCESS.ownerManager'), 'sidebar accounting entry must be owner/manager only');
   console.log('  ✓ sidebar exposes accounting to owner/manager');
+
+  // 7. The fiscal-period badge must match the backend gate (`assertNotInClosedPeriod`
+  //    blocks only a covering `closed` period, so an uncovered date is postable).
+  const fiscalTab = read(path.join(ACCOUNTING_DIR, 'FiscalPeriodsTab.tsx'));
+  assert(!fiscalTab.includes("currentPeriod?.status === 'open'"), 'fiscal tab must not equate "no covering period" with a closed period');
+  assert(fiscalTab.includes("from '@/lib/fiscal-periods'"), 'fiscal tab must use the shared closed-period projection');
+  assert(/const postable = !isDateInClosedPeriod\(/.test(fiscalTab), 'fiscal tab must derive postable from the closed-period projection');
+  const { isDateInClosedPeriod } = require(LIB_FISCAL_PERIODS) as {
+    isDateInClosedPeriod: (
+      periods: Array<{ status: 'open' | 'closed'; start_date: string; end_date: string }>,
+      businessDate: string,
+    ) => boolean;
+  };
+  const businessDate = '2026-10-07';
+  const coveringOpen = [{ status: 'open' as const, start_date: '2026-10-01', end_date: '2026-10-31' }];
+  const coveringClosed = [{ status: 'closed' as const, start_date: '2026-10-01', end_date: '2026-10-31' }];
+  const closedOtherMonth = [{ status: 'closed' as const, start_date: '2026-09-01', end_date: '2026-09-30' }];
+  assert(isDateInClosedPeriod(coveringOpen, businessDate) === false, 'F1-A: an open covering period must stay postable');
+  assert(isDateInClosedPeriod(coveringClosed, businessDate) === true, 'F1-B: a closed covering period must block posting');
+  assert(isDateInClosedPeriod([], businessDate) === false, 'F1-C: no covering period must not be treated as closed');
+  assert(isDateInClosedPeriod(closedOtherMonth, businessDate) === false, 'F1-C: a closed period outside the date must not block posting');
+  console.log('  ✓ fiscal-period badge matches the backend closed-period gate (open / closed / uncovered)');
 
   console.log('\n✅ All accounting UI contract checks passed.');
 }
