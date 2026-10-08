@@ -202,6 +202,35 @@ async function main() {
   assertEqual(domain(recon, 'cash').status, 'NOT_RECONCILABLE', 'cash drawer semantics are reported as not reconcilable');
   assertEqual(recon.all_reconciled, true, 'all reconcilable domains match');
 
+  // ── Credit sale: the customer-account bill is a sale, not a gap ──
+  db.prepare("INSERT INTO orders (order_number, type, status, subtotal, tax_amount, total, created_at, updated_at) VALUES ('ORD-H2', 'takeaway', 'completed', 90, 0, 90, ?, ?)").run(at, at);
+  const creditOrderId = Number(db.prepare("SELECT id FROM orders WHERE order_number = 'ORD-H2'").get().id);
+  db.prepare(`
+    INSERT INTO bills (bill_number, order_id, subtotal, tax_amount, total, paid_amount, balance, payment_status, payment_details, created_at, updated_at)
+    VALUES ('B-H2', ?, 90, 0, 90, 90, 0, 'paid', ?, ?, ?)
+  `).run(creditOrderId, JSON.stringify([{ method: 'customer_account', amount: 90, event_id: 'ev-h2', batch_id: 'bt-h2', timestamp: at }]), at, at);
+  const creditBillId = Number(db.prepare("SELECT id FROM bills WHERE bill_number = 'B-H2'").get().id);
+  db.prepare(`
+    INSERT INTO receivable_entries (id, customer_id, entry_type, direction, amount, reference, entry_date, created_at)
+    VALUES ('r2', 'cust-h1', 'charge', 'debit', 90, ?, ?, ?)
+  `).run(String(creditBillId), D1, at);
+  const creditJournal = post({ description: 'Sale B-H2', sourceModule: 'sales', sourceId: String(creditBillId), seq: 1, reference: 'B-H2', lines: [
+    { accountId: accountOf('1100'), direction: 'debit', amount: 90 },
+    { accountId: accountOf('4000'), direction: 'credit', amount: 90 },
+  ] });
+  const reconCredit = getReconciliation(WIDE);
+  assertEqual(domain(reconCredit, 'sales').source_total, 208, 'sales source counts the customer-account (AR) sale total');
+  assertEqual(domain(reconCredit, 'sales').status, 'MATCH', 'a credit sale reconciles against its AR-debit sale journal');
+  assertEqual(domain(reconCredit, 'sales').details.unmatched_sale_journals, 0, 'the credit sale journal is paired with its bill');
+  assertEqual(domain(reconCredit, 'receivables').status, 'MATCH', 'the bill-backed charge mirror journals nothing, so receivables stay matched');
+
+  // The pairing rule detects, it does not hide: drop the projection and it is flagged.
+  db.prepare('DELETE FROM journal_entry_lines WHERE journal_id = ?').run(creditJournal.id);
+  db.prepare('DELETE FROM journal_entries WHERE id = ?').run(creditJournal.id);
+  const reconCreditMissing = getReconciliation(WIDE);
+  assertEqual(domain(reconCreditMissing, 'sales').status, 'MISMATCH', 'a credit sale whose journal is missing is still flagged');
+  assertEqual(domain(reconCreditMissing, 'sales').difference, 90, 'the reported difference is the missing AR sale journal');
+
   // ── Discrepancy detection: extra journal, missing journal, missing COGS ──
   post({ description: 'Orphan expense', sourceModule: 'expenses', sourceId: 'e-orphan', seq: 1, reference: 'x', lines: [
     { accountId: accountOf('5000'), direction: 'debit', amount: 5 },

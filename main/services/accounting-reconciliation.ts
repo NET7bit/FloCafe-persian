@@ -18,12 +18,17 @@ import { resolveReportRange, ReportRangeInput } from './accounting-reports';
 import { fiscalDateForInstant } from './fiscal-periods';
 import { getCurrencyMinorUnitFactor, resolveTenantCurrency } from '../countries';
 import { COGS_ACCOUNT_CODE } from './accounting-cogs-adapter';
+import { ACCOUNTED_TENDER_METHODS } from './accounting-sales-adapter';
 
 type Database = ReturnType<typeof getDatabase>;
 
 const TOLERANCE = 1e-6;
 
-/** Tenders with a v1 chart account; the adapters skip everything else (wallet/custom/other). */
+/**
+ * Tenders with a v1 chart account for the expense/payment-out/refund domains;
+ * their adapters skip everything else (wallet/custom/other). Sales has its own
+ * accounted set (`customer_account` → `1100`) and must not use this one.
+ */
 const ACCOUNTED_TENDERS = new Set(['cash', 'card', 'bank_transfer', 'cheque']);
 
 export type ReconciliationStatus = 'MATCH' | 'MISMATCH' | 'NOT_RECONCILABLE';
@@ -174,10 +179,13 @@ function refundDomain(db: Database, from: string, to: string, minorFactor: numbe
 }
 
 /**
- * Sales: a bill is a recognized sale once it carries at least one accounted
- * payment event (the same rule the C adapter uses). Its authoritative amount is
- * the bill total; the ledger side is the recognized sale journals (seq 1),
- * whose debits sum to the bill total.
+ * Sales: a bill is a recognized sale once it carries at least one payment event
+ * on a tender the sales adapter can post (`ACCOUNTED_TENDER_METHODS`, which
+ * includes `customer_account` → AR). Its authoritative amount is the bill total;
+ * the ledger side is the recognized sale journals (seq 1), whose debits sum to
+ * the bill total. Both sides must share one recognition rule: the adapter posts
+ * a credit sale's AR debit on the same sale journal, so excluding that bill from
+ * the source side reports a difference the ledger never created.
  */
 function salesDomain(db: Database, from: string, to: string): { source: number; count: number; journal: number; unmatched: number } {
   const bills = db.prepare('SELECT id, total, payment_details, created_at FROM bills').all() as Array<{ id: number; total: number; payment_details: string | null; created_at: string }>;
@@ -215,7 +223,7 @@ function hasAccountedEvent(raw: unknown): boolean {
   const rows = Array.isArray(parsed) ? parsed : [parsed];
   return rows.some((row: any) => row && typeof row === 'object'
     && typeof row.event_id === 'string' && row.event_id.trim() !== ''
-    && typeof row.method === 'string' && ACCOUNTED_TENDERS.has(row.method));
+    && typeof row.method === 'string' && ACCOUNTED_TENDER_METHODS.has(row.method));
 }
 
 /**

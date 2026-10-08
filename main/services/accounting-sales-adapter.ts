@@ -64,8 +64,12 @@ function saleBatchIdOf(lines: ParsedPaymentLine[]): string | null {
   return lines.find((line) => line.batchId !== null)?.batchId ?? null;
 }
 
-/** Tenders with a v1 chart account; anything else (wallet/custom) is skipped. */
-const ACCOUNTED_TENDER_METHODS = new Set(['cash', 'card', 'customer_account']);
+/**
+ * Tenders with a v1 chart account; anything else (wallet/custom) is skipped.
+ * Reconciliation imports this same set as the sale-recognition rule, so the
+ * source side and the ledger side always agree on which bills are sales.
+ */
+export const ACCOUNTED_TENDER_METHODS = new Set(['cash', 'card', 'customer_account']);
 
 function tenderAccountCode(method: string): string {
   if (method === 'card') return '1010';
