@@ -38,6 +38,7 @@ This index classifies documentation in `docs/` so contributors and AI agents kno
 | [business-decisions.md](business-decisions.md) | Running, verifiable log of explicit product/business decisions (e.g. orders are never ownership-gated) that code must not silently contradict. | CURRENT |
 | [floadmin-support-ticket-log-handoff.md](floadmin-support-ticket-log-handoff.md) | Handoff for the external cloud/floadmin service: the optional `log_tail` field now included in support ticket submissions, its size cap, and storage/retention recommendations. | CURRENT |
 | [daily-sales-export.md](daily-sales-export.md) | Owner-only daily sales export contract (XLSX Summary+Items and two-file CSV): accounting rules, reconciliation identities, file formats, and test coverage. | CURRENT |
+| [operations-runbook.md](operations-runbook.md) | Operator runbook: daily health, local backup/retention policy and its settings keys, log locations and failure visibility, incident playbook, LAN trust-boundary policy, Persian printing status, restore rehearsal policy, and the repeatable restaurant-day UAT procedure. | CURRENT |
 
 ### Active design & forward-looking plans
 

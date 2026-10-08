@@ -8,6 +8,7 @@ import { getDatabase, initDatabase, closeDatabase, waitForDatabaseRequests, begi
 import { BETA_CHANNEL_SETTING_KEY, parseStoredBetaChannelEnabled, resolveUpdateChannel } from './update-channel';
 import { computeTaxPackUpdates, fetchRemoteTaxPackCatalog } from './tax-packs/catalog';
 import { startServer, stopServer, getLocalIP, isServerRunning, getServerPort } from './server';
+import { startLocalBackupScheduler } from './services/backup-scheduler';
 import { cloudSync } from './services/cloud-sync';
 import { telemetry, sendEvent as sendTelemetryEvent } from './services/telemetry';
 import { googleDrive } from './services/google-drive';
@@ -1187,6 +1188,7 @@ async function initialize(): Promise<void> {
     cloudSync.start();
     telemetry.start();
     googleDrive.start();
+    startLocalBackupScheduler();
 
     console.log('[Flo] Starting KDS server on port 3002...');
     await startKdsServer();

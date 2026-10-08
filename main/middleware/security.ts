@@ -368,9 +368,15 @@ export const corsOptions = {
         return callback(null, true);
       }
       
-      callback(new Error('Not allowed by CORS'));
+      // A policy rejection, not a server fault: keep the 4xx status so the global
+      // error handler reports "Not allowed by CORS" instead of "Internal server error".
+      const denied = new Error('Not allowed by CORS') as Error & { status?: number };
+      denied.status = 403;
+      callback(denied);
     } catch (err) {
-      callback(new Error('Invalid origin format'));
+      const invalid = new Error('Invalid origin format') as Error & { status?: number };
+      invalid.status = 400;
+      callback(invalid);
     }
   }
 };
