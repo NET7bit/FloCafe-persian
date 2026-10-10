@@ -433,6 +433,33 @@ export const getCurrencyUnitAdapter = (
   };
 };
 
+// Validates a stored currency_display setting against the country profile,
+// falling back to the neutral default rather than trusting an arbitrary string.
+export const resolveStoredCurrencyDisplay = (stored: string | undefined, countryCode: string): CurrencyDisplay =>
+  resolveStoredLocalePreference('currency_display', stored, countryCode) as CurrencyDisplay;
+
+/**
+ * Suffix amount unit for tenants that display a unit word instead of a currency
+ * symbol (Iran Toman/Toman-short). Presentation only: stored amounts stay
+ * canonical in the tenant currency (docs/business-decisions.md).
+ */
+export interface CurrencyDisplayUnit {
+  /** Unit word rendered after the amount (e.g. `تومان`). */
+  readonly label: string;
+  /** Display scale applied to stored amounts (0.1 = 10 Rial → 1 Toman). */
+  readonly scale: number;
+}
+
+/** Resolves the suffix display unit, or null when amounts use the symbol path. */
+export const resolveCurrencyDisplayUnit = (
+  currency: string,
+  currencyDisplay: CurrencyDisplay,
+): CurrencyDisplayUnit | null => {
+  if (currency !== IRAN_CURRENCY || currencyDisplay === 'rial') return null;
+  const adapter = getCurrencyUnitAdapter(currency, undefined, { currencyDisplay });
+  return { label: adapter.label, scale: adapter.scale };
+};
+
 export const formatCurrencyForTenant = (
   amount: number,
   countryCode: string,

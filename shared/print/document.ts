@@ -216,6 +216,15 @@ export type LabelResolver = (conceptId: LabelConceptId, language: PrintLanguageC
  * locale-formatting preferences derived from existing regionalization
  * helpers at the call site.
  */
+/**
+ * Suffix amount unit: the unit word plus the display scale applied to stored
+ * amounts (0.1 = 10 Rial → 1 Toman). Stored amounts themselves never change.
+ */
+export interface SuffixAmountUnit {
+  readonly label: string;
+  readonly scale: number;
+}
+
 export interface PrintContext {
   /** Printable paper columns (32…48 for thermal receipts today). */
   readonly columns: number;
@@ -229,6 +238,12 @@ export interface PrintContext {
   readonly currency: string;
   /** Currency symbol as configured for the business. KOT rendering does not read this field. */
   readonly currencySymbol: string;
+  /**
+   * Suffix amount unit (e.g. `تومان`) for tenants that display a unit word
+   * instead of a symbol; null/absent keeps the symbol path. Presentation only —
+   * the unit is declared once per table/total rather than on every row.
+   */
+  readonly currencyUnit?: SuffixAmountUnit | null;
   /** Whether trailing `.00` decimals are trimmed on amounts. */
   readonly trimDecimals: boolean;
   /** Optional IANA timezone for business-local date presentation. */
@@ -465,6 +480,20 @@ function resolveSemanticLabel(labels: LabelContext, conceptId: LabelConceptId): 
   });
 }
 
+/**
+ * Amount column header for a suffix-unit tenant: the unit is declared once in
+ * the header (`مبلغ (تومان)`) so item rows stay numeric-only.
+ */
+function amountHeaderLabel(labels: LabelContext, unit: SuffixAmountUnit | null): SemanticLabel {
+  const label = resolveSemanticLabel(labels, 'receipt.amount');
+  if (!unit) return label;
+  return Object.freeze({
+    conceptId: 'receipt.amount' as LabelConceptId,
+    primary: `${label.primary} (${unit.label})`,
+    ...(label.secondary !== undefined ? { secondary: `${label.secondary} (${unit.label})` } : {}),
+  });
+}
+
 function literalLabel(primary: string): SemanticLabel {
   return Object.freeze({ primary });
 }
@@ -621,7 +650,7 @@ export function buildBillDocument(printData: PrintData, printContext: PrintConte
       item: resolveSemanticLabel(labels, 'receipt.item'),
       quantity: resolveSemanticLabel(labels, 'receipt.qty'),
       rate: resolveSemanticLabel(labels, 'receipt.rate'),
-      amount: resolveSemanticLabel(labels, 'receipt.amount'),
+      amount: amountHeaderLabel(labels, printContext.currencyUnit ?? null),
     }),
     noteLabel: resolveSemanticLabel(labels, 'print.note'),
     rows: Object.freeze(order.items.map((item) => Object.freeze({

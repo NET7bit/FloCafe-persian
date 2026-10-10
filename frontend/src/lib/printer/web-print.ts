@@ -10,6 +10,9 @@ import {
   formatCurrencyForTenant,
   formatNumberForTenant,
   formatDateForTenant,
+  resolveCurrencyDisplayUnit,
+  resolveStoredCurrencyDisplay,
+  type CurrencyDisplayUnit,
 } from '@/lib/countries';
 import { columnsForReceiptPaperSize } from '@print/width';
 import { parseDbTimestamp } from '@/lib/utils';
@@ -287,6 +290,7 @@ export function generateBillHtml(
 
   const items = itemsBlock?.rows ?? [];
   const fmtAmount = (value: number) => formatAmount(value, tenant, trimDecimals);
+  const fmtItemAmount = (value: number) => formatItemAmount(value, tenant, trimDecimals);
   const fmtQuantity = (value: number) => formatNumberForTenant(
     Number(value) || 0,
     tenant.country,
@@ -349,12 +353,12 @@ export function generateBillHtml(
           <tr>
             <td>
               ${escapeHtml(row.name.text)}
-              ${row.addons.length > 0 ? `<br><small class="text-muted">${row.addons.map(a => `+ ${escapeHtml(a.name.text)}${(a.quantity ?? 1) > 1 ? ` ×${escapeHtml(a.quantity)}` : ''}${a.price > 0 ? ` (${fmtAmount(a.price)})` : ''}`).join(', ')}</small>` : ''}
+              ${row.addons.length > 0 ? `<br><small class="text-muted">${row.addons.map(a => `+ ${escapeHtml(a.name.text)}${(a.quantity ?? 1) > 1 ? ` ×${escapeHtml(a.quantity)}` : ''}${a.price > 0 ? ` (${fmtItemAmount(a.price)})` : ''}`).join(', ')}</small>` : ''}
               ${row.specialInstructions ? `<br><small class="text-italic">${escapeHtml(row.specialInstructions.text)}</small>` : ''}
             </td>
             <td class="text-end num">${fmtQuantity(row.quantity)}</td>
-            <td class="text-end num">${fmtAmount(row.unitPrice ?? 0)}</td>
-            <td class="text-end num">${fmtAmount(row.amount)}</td>
+            <td class="text-end num">${fmtItemAmount(row.unitPrice ?? 0)}</td>
+            <td class="text-end num">${fmtItemAmount(row.amount)}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -507,6 +511,19 @@ function getPaperStyles(size: PaperSize): string {
   }
 }
 
+/**
+ * Suffix amount unit (`تومان`) when the tenant displays a unit word instead of
+ * a symbol, else null. Stored amounts stay canonical in the tenant currency.
+ */
+function suffixAmountUnit(tenant: ReceiptTenant): CurrencyDisplayUnit | null {
+  const currencyIsRial = tenant.currency === 'IRR' || (!tenant.currency && tenant.country === 'IR');
+  if (!currencyIsRial) return null;
+  return resolveCurrencyDisplayUnit(
+    'IRR',
+    resolveStoredCurrencyDisplay(tenant.currency_display ?? undefined, tenant.country ?? ''),
+  );
+}
+
 /** Format amount per tenant currency display, digit mode, and trimDecimals prefs. */
 function formatAmount(value: number, tenant: ReceiptTenant, trimDecimals = false): string {
   const numeric = Number.isFinite(Number(value)) ? Number(value) : 0;
@@ -514,9 +531,7 @@ function formatAmount(value: number, tenant: ReceiptTenant, trimDecimals = false
   const fractionDigits = getCurrencyFractionDigits(tenant.currency);
   const factor = 10 ** fractionDigits;
   const hasDecimals = fractionDigits > 0 && Math.round(numeric * factor) % factor !== 0;
-  const isToman =
-    (tenant.currency === 'IRR' || (!tenant.currency && tenant.country === 'IR')) &&
-    (tenant.currency_display === 'toman' || tenant.currency_display === 'toman_short');
+  const isToman = suffixAmountUnit(tenant) !== null;
 
   // trimDecimals hides trailing .00 only when there is no fractional part.
   if (trimDecimals && !hasDecimals && !isToman) {
@@ -538,6 +553,22 @@ function formatAmount(value: number, tenant: ReceiptTenant, trimDecimals = false
   }
 
   return formatCurrencyForTenant(numeric, tenant.country, tenant.currency, prefs);
+}
+
+/**
+ * Item rows render as bare numbers when a suffix unit is declared once in the
+ * amount column header (the unit is never repeated on every row). Stored
+ * amounts are scaled by the same display scale the totals use.
+ */
+function formatItemAmount(value: number, tenant: ReceiptTenant, trimDecimals = false): string {
+  const unit = suffixAmountUnit(tenant);
+  if (unit === null) return formatAmount(value, tenant, trimDecimals);
+  const numeric = Number.isFinite(Number(value)) ? Number(value) : 0;
+  return formatNumberForTenant(
+    unit.scale === 1 ? numeric : numeric * unit.scale,
+    tenant.country,
+    { digits: tenant.number_digits },
+  );
 }
 
 function formatReceiptDate(iso: string, tenant: ReceiptTenant, locale?: string): string {

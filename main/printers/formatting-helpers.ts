@@ -53,8 +53,8 @@ function makeUnsupportedLineWarning(isStoreName: boolean, text: string): string 
   return `${label} was not printed because ${why}: ${text}`;
 }
 
-export function itemNameWidth(cols: number, amtLen: number): number {
-  return Math.max(1, cols - 4 - amtLen);
+export function itemNameWidth(cols: number, amtLen: number, qtyWidth: number = 4): number {
+  return Math.max(1, cols - qtyWidth - amtLen);
 }
 
 export function itemAmountWidth(
@@ -64,6 +64,7 @@ export function itemAmountWidth(
   trimDecimals: boolean,
   cols: number,
   fractionDigits: number = 2,
+  qtyWidth: number = 4,
 ): number {
   let width = 10;
   for (const item of order?.items ?? []) {
@@ -74,11 +75,11 @@ export function itemAmountWidth(
       }
     }
   }
-  return Math.min(width, Math.max(1, cols - 5));
+  return Math.min(width, Math.max(1, cols - qtyWidth - 1));
 }
 
-export function itemRows(item: any, nameLen: number, amtLen: number, cols: number, prefix: string, locale: string = 'en-US', trimDecimals: boolean = false, _language: string = 'en', fractionDigits: number = 2, capabilities?: ThermalPrinterCapabilities): string[] {
-  const qtyW = 4;
+export function itemRows(item: any, nameLen: number, amtLen: number, cols: number, prefix: string, locale: string = 'en-US', trimDecimals: boolean = false, _language: string = 'en', fractionDigits: number = 2, capabilities?: ThermalPrinterCapabilities, qtyWidth: number = 4): string[] {
+  const qtyW = qtyWidth;
   const productName = normalizeThermalText(item.product_name, capabilities);
   const amount = formatCurrency(item.total, prefix, locale, trimDecimals, fractionDigits);
   const qty = String(item.quantity).padEnd(qtyW);
@@ -165,7 +166,12 @@ function getSafeLatnLocale(locale: string | undefined): string {
   return `${locale}-u-nu-latn`;
 }
 
-export function formatCurrency(amount: number, prefix: string, locale: string = 'en-US', trimDecimals: boolean = false, fractionDigits: number = 2): string {
+/**
+ * Amount text for thermal lines. `unit` selects suffix display (e.g. Toman),
+ * where the unit word follows the number and the symbol prefix is dropped;
+ * omitted keeps the symbol-prefix layout.
+ */
+export function formatCurrency(amount: number, prefix: string, locale: string = 'en-US', trimDecimals: boolean = false, fractionDigits: number = 2, unit?: string | null): string {
   const numeric = Number(amount) || 0;
   const factor = 10 ** fractionDigits;
   const hasDecimals = Math.round(numeric * factor) % factor !== 0;
@@ -174,7 +180,7 @@ export function formatCurrency(amount: number, prefix: string, locale: string = 
     minimumFractionDigits: trimDecimals && !hasDecimals ? 0 : fractionDigits,
     maximumFractionDigits: fractionDigits,
   }).replace(/[\u00A0\u202F]/g, ' ');
-  return prefix + formattedNum;
+  return unit ? `${formattedNum} ${unit}` : prefix + formattedNum;
 }
 
 export function rightAlign(text: string, width: number = 24): string {

@@ -485,6 +485,8 @@ router.post('/print-bill', requireRole(...ROLE_ACCESS.sales), asyncHandler(async
       // CLDR-derived only — a stored currency_symbol setting is not an input
       // (docs/business-decisions.md: no per-store override of a snapshot value).
       currency_symbol: getCurrencySymbol(currency, getCountryByCode(country)?.locale) || currency,
+      // Display-only preference (e.g. Toman) — stored amounts stay canonical.
+      currency_display: settings.currency_display || '',
       country,
       instagram_handle: settings.instagram_handle || '',
       customer_name: customer?.name || '',

@@ -4,7 +4,14 @@ import type { Bill, Tenant } from '@/lib/types';
 import { normalizeCurrencyToAscii, normalizeThermalText, padCurrencyPrefix } from './unicode';
 import { selectThermalCodePage, type ThermalPrinterCapabilities } from '@print/thermal-capabilities';
 import { columnsForReceiptPaperSize, fitThermalLine } from '@print/width';
-import { getCountryByCode, getCurrencyFractionDigits, getCurrencySymbol, resolveTenantCurrency } from '@/lib/countries';
+import {
+  getCountryByCode,
+  getCurrencyFractionDigits,
+  getCurrencySymbol,
+  resolveCurrencyDisplayUnit,
+  resolveStoredCurrencyDisplay,
+  resolveTenantCurrency,
+} from '@/lib/countries';
 import { formatDate } from './format-date';
 import { formatTaxComponentLabel, resolveTaxComponents } from './tax-components';
 import { parseDbTimestamp } from '@/lib/utils';
@@ -240,7 +247,7 @@ function getSafeLatnLocale(locale: string | undefined): string {
 /** Build semantic document and resolved blocks for one thermal receipt. */
 function buildReceiptEnvironment(
   bill: Bill,
-  tenant: Pick<Tenant, 'business_name' | 'currency' | 'country'> & Partial<Pick<Tenant, 'timezone'>>,
+  tenant: Pick<Tenant, 'business_name' | 'currency' | 'country'> & Partial<Pick<Tenant, 'timezone' | 'currency_display'>>,
   opts: ReceiptOptions,
   cols: number,
 ): DocumentBlocks {
@@ -374,7 +381,7 @@ function fitLabeledValue(label: string, value: string, cols: number): string[] {
 // Classic template
 export function buildClassicReceiptBytes(
   bill: Bill,
-  tenant: Pick<Tenant, 'business_name' | 'currency' | 'country'> & Partial<Pick<Tenant, 'timezone'>>,
+  tenant: Pick<Tenant, 'business_name' | 'currency' | 'country'> & Partial<Pick<Tenant, 'timezone' | 'currency_display'>>,
   opts: ReceiptOptions = {},
   warnings?: PrintWarning[]
 ): Uint8Array {
@@ -387,9 +394,20 @@ export function buildClassicReceiptBytes(
   const cols = CHARS[paperWidth];
   const currencyCode = resolveTenantCurrency(tenant.currency, tenant.country);
   const rawCurrency = getCurrencySymbol(currencyCode, getCountryByCode(tenant.country)?.locale);
-  const currency = resolveEncoderCurrency(rawCurrency, currencyCode, useUnicode, opts.capabilities);
+  const symbolCurrency = resolveEncoderCurrency(rawCurrency, currencyCode, useUnicode, opts.capabilities);
   const fractionDigits = getCurrencyFractionDigits(currencyCode);
   const locale = getCountryByCode(tenant.country)?.locale ?? 'en-US';
+  // A suffix display unit (Toman) is declared once per column header and total
+  // row: amounts carry no symbol prefix, and stored Rial scales for display only.
+  const displayUnit = resolveCurrencyDisplayUnit(
+    currencyCode,
+    resolveStoredCurrencyDisplay(tenant.currency_display ?? undefined, tenant.country ?? ''),
+  );
+  const currency = displayUnit ? '' : symbolCurrency;
+  const unitLabel = displayUnit?.label ?? null;
+  const unitScale = displayUnit?.scale ?? 1;
+  const summaryAmount = (value: number | string): string =>
+    formatAmount(value, currency, locale, opts.trimDecimals === true, fractionDigits, unitLabel, unitScale);
   const env = buildReceiptEnvironment(bill, tenant, opts, cols);
   const { header, meta, customer, items, breakdown, totals, payments, messages, languages } = env;
   const primaryLang = languages[0];
@@ -412,7 +430,7 @@ export function buildClassicReceiptBytes(
     item: labelOf(items?.header.item ?? { primary: '' }),
     qty: labelOf(items?.header.quantity ?? { primary: '' }),
     rate: printLabelResolver('receipt.rate', primaryLang),
-    amount: printLabelResolver('printTest.amt', primaryLang),
+    amount: amountHeaderLabel(printLabelResolver('printTest.amt', primaryLang), unitLabel),
   };
 
   const enc = new ReceiptPrinterEncoder({ columns: cols });
@@ -520,26 +538,26 @@ export function buildClassicReceiptBytes(
     if (totals.pointsRedeemed) {
       safePrinterText(enc, padRow(labelOf(totals.pointsRedeemed.label), `-${totals.pointsRedeemed.points} pts`, cols), warnings, false, arabicShaping).newline();
     }
-    safePrinterText(enc, padRow(labelOf(totals.subtotal.label), formatAmount(totals.subtotal.amount, currency, locale, opts.trimDecimals === true, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+    safePrinterText(enc, padRow(labelOf(totals.subtotal.label), summaryAmount(totals.subtotal.amount), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
     if (totals.discount) {
-      safePrinterText(enc, padRow(labelOf(totals.discount.label), `-${formatAmount(totals.discount.amount, currency, locale, opts.trimDecimals === true, fractionDigits)}`, cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+      safePrinterText(enc, padRow(labelOf(totals.discount.label), `-${summaryAmount(totals.discount.amount)}`, cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
     }
     if (totals.tax) {
-      safePrinterText(enc, padRow(labelOf(totals.tax.label), formatAmount(totals.tax.amount, currency, locale, opts.trimDecimals === true, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+      safePrinterText(enc, padRow(labelOf(totals.tax.label), summaryAmount(totals.tax.amount), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
     }
     if (totals.serviceCharge) {
-      safePrinterText(enc, padRow(labelOf(totals.serviceCharge.label), formatAmount(totals.serviceCharge.amount, currency, locale, opts.trimDecimals === true, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+      safePrinterText(enc, padRow(labelOf(totals.serviceCharge.label), summaryAmount(totals.serviceCharge.amount), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
     }
     if (totals.deliveryCharge) {
-      safePrinterText(enc, padRow(labelOf(totals.deliveryCharge.label), formatAmount(totals.deliveryCharge.amount, currency, locale, opts.trimDecimals === true, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+      safePrinterText(enc, padRow(labelOf(totals.deliveryCharge.label), summaryAmount(totals.deliveryCharge.amount), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
     }
     if (totals.packagingCharge) {
-      safePrinterText(enc, padRow(labelOf(totals.packagingCharge.label), formatAmount(totals.packagingCharge.amount, currency, locale, opts.trimDecimals === true, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+      safePrinterText(enc, padRow(labelOf(totals.packagingCharge.label), summaryAmount(totals.packagingCharge.amount), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
     }
 
     enc.rule({ style: 'double' });
     enc.bold(true);
-    safePrinterText(enc, padRow(labelOf(totals.grandTotal.label), formatAmount(totals.grandTotal.amount, currency, locale, opts.trimDecimals === true, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true);
+    safePrinterText(enc, padRow(labelOf(totals.grandTotal.label), summaryAmount(totals.grandTotal.amount), cols), warnings, false, arabicShaping, undefined, undefined, true);
     enc
       .bold(false)
       .newline();
@@ -549,7 +567,7 @@ export function buildClassicReceiptBytes(
   // Payment methods
   for (const line of payments?.lines ?? []) {
     for (const row of paymentDisplayRows(line)) {
-      safePrinterText(enc, padRow(paymentLabel(row.label), formatAmount(row.amount, currency, locale, opts.trimDecimals === true, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+      safePrinterText(enc, padRow(paymentLabel(row.label), summaryAmount(row.amount), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
     }
   }
   if (totals?.pointsEarned || totals?.pointsBalance) {
@@ -570,7 +588,7 @@ export function buildClassicReceiptBytes(
       const rateSuffix = line.rate === null ? '' : ` @${line.rate}%`;
       safePrinterText(
         enc,
-        padRow(` ${line.label.primary}${rateSuffix}`, formatAmount(line.amount, currency, locale, opts.trimDecimals === true, fractionDigits), cols),
+        padRow(` ${line.label.primary}${rateSuffix}`, summaryAmount(line.amount), cols),
         warnings,
         false,
         arabicShaping,
@@ -614,7 +632,7 @@ export function buildClassicReceiptBytes(
 // Compact template
 export function buildCompactReceiptBytes(
   bill: Bill,
-  tenant: Pick<Tenant, 'business_name' | 'currency' | 'country'> & Partial<Pick<Tenant, 'timezone'>>,
+  tenant: Pick<Tenant, 'business_name' | 'currency' | 'country'> & Partial<Pick<Tenant, 'timezone' | 'currency_display'>>,
   opts: ReceiptOptions = {},
   warnings?: PrintWarning[]
 ): Uint8Array {
@@ -626,9 +644,20 @@ export function buildCompactReceiptBytes(
   const cols = CHARS[paperWidth];
   const currencyCode = resolveTenantCurrency(tenant.currency, tenant.country);
   const rawCurrency = getCurrencySymbol(currencyCode, getCountryByCode(tenant.country)?.locale);
-  const currency = resolveEncoderCurrency(rawCurrency, currencyCode, useUnicode, opts.capabilities);
+  const symbolCurrency = resolveEncoderCurrency(rawCurrency, currencyCode, useUnicode, opts.capabilities);
   const fractionDigits = getCurrencyFractionDigits(currencyCode);
   const locale = getCountryByCode(tenant.country)?.locale ?? 'en-US';
+  // A suffix display unit (Toman) is declared once per column header and total
+  // row: amounts carry no symbol prefix, and stored Rial scales for display only.
+  const displayUnit = resolveCurrencyDisplayUnit(
+    currencyCode,
+    resolveStoredCurrencyDisplay(tenant.currency_display ?? undefined, tenant.country ?? ''),
+  );
+  const currency = displayUnit ? '' : symbolCurrency;
+  const unitLabel = displayUnit?.label ?? null;
+  const unitScale = displayUnit?.scale ?? 1;
+  const summaryAmount = (value: number | string): string =>
+    formatAmount(value, currency, locale, opts.trimDecimals === true, fractionDigits, unitLabel, unitScale);
   // Business/show flags flow into the document via `opts`; the renderer only
   // sees resolved blocks.
   const env = buildReceiptEnvironment(bill, tenant, opts, cols);
@@ -737,31 +766,31 @@ export function buildCompactReceiptBytes(
   enc.rule({ style: 'single' });
 
   if (totals?.discount) {
-    safePrinterText(enc, padRow(labelOf(totals.discount.label), `-${formatAmount(totals.discount.amount, currency, locale, trim, fractionDigits)}`, cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+    safePrinterText(enc, padRow(labelOf(totals.discount.label), `-${summaryAmount(totals.discount.amount)}`, cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
   }
   if (totals?.tax) {
-    safePrinterText(enc, padRow(labelOf(totals.tax.label), formatAmount(totals.tax.amount, currency, locale, trim, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+    safePrinterText(enc, padRow(labelOf(totals.tax.label), summaryAmount(totals.tax.amount), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
   }
   if (totals?.serviceCharge) {
-    safePrinterText(enc, padRow(labelOf(totals.serviceCharge.label), formatAmount(totals.serviceCharge.amount, currency, locale, trim, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+    safePrinterText(enc, padRow(labelOf(totals.serviceCharge.label), summaryAmount(totals.serviceCharge.amount), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
   }
   if (totals?.deliveryCharge) {
-    safePrinterText(enc, padRow(labelOf(totals.deliveryCharge.label), formatAmount(totals.deliveryCharge.amount, currency, locale, trim, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+    safePrinterText(enc, padRow(labelOf(totals.deliveryCharge.label), summaryAmount(totals.deliveryCharge.amount), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
   }
   if (totals?.packagingCharge) {
-    safePrinterText(enc, padRow(labelOf(totals.packagingCharge.label), formatAmount(totals.packagingCharge.amount, currency, locale, trim, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+    safePrinterText(enc, padRow(labelOf(totals.packagingCharge.label), summaryAmount(totals.packagingCharge.amount), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
   }
   if (breakdown && breakdown.lines.length > 0) {
     for (const line of breakdown.lines) {
       const rateSuffix = line.rate === null ? '' : ` @${line.rate}%`;
-      safePrinterText(enc, padRow(`${line.label.primary}${rateSuffix}`, formatAmount(line.amount, currency, locale, trim, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+      safePrinterText(enc, padRow(`${line.label.primary}${rateSuffix}`, summaryAmount(line.amount), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
     }
   }
 
   enc.rule({ style: 'double' });
   if (totals) {
     enc.bold(true);
-    safePrinterText(enc, padRow(labelOf(totals.grandTotal.label), formatAmount(totals.grandTotal.amount, currency, locale, trim, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true);
+    safePrinterText(enc, padRow(labelOf(totals.grandTotal.label), summaryAmount(totals.grandTotal.amount), cols), warnings, false, arabicShaping, undefined, undefined, true);
     enc
       .bold(false)
       .newline();
@@ -769,7 +798,7 @@ export function buildCompactReceiptBytes(
 
   for (const line of payments?.lines ?? []) {
     for (const row of paymentDisplayRows(line)) {
-      safePrinterText(enc, padRow(paymentLabel(row.label), formatAmount(row.amount, currency, locale, trim, fractionDigits), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
+      safePrinterText(enc, padRow(paymentLabel(row.label), summaryAmount(row.amount), cols), warnings, false, arabicShaping, undefined, undefined, true).newline();
     }
   }
 
@@ -793,7 +822,7 @@ export function buildCompactReceiptBytes(
 // Legacy detailed tax encoder for print tests; retains raw-bill rendering.
 export function buildDetailedReceiptBytes(
   bill: Bill,
-  tenant: Pick<Tenant, 'business_name' | 'currency' | 'country'> & Partial<Pick<Tenant, 'timezone'>>,
+  tenant: Pick<Tenant, 'business_name' | 'currency' | 'country'> & Partial<Pick<Tenant, 'timezone' | 'currency_display'>>,
   opts: ReceiptOptions = {},
   warnings?: PrintWarning[]
 ): Uint8Array {
@@ -823,9 +852,20 @@ export function buildDetailedReceiptBytes(
   const truncate = (text: string, max: number): string => truncateForLanguage(text, max, primaryLang, opts.capabilities);
   const currencyCode = resolveTenantCurrency(tenant.currency, tenant.country);
   const rawCurrency = getCurrencySymbol(currencyCode, getCountryByCode(tenant.country)?.locale);
-  const currency = resolveEncoderCurrency(rawCurrency, currencyCode, useUnicode, opts.capabilities);
+  const symbolCurrency = resolveEncoderCurrency(rawCurrency, currencyCode, useUnicode, opts.capabilities);
   const fractionDigits = getCurrencyFractionDigits(currencyCode);
   const locale = getCountryByCode(tenant.country)?.locale ?? 'en-US';
+  // A suffix display unit (Toman) is declared once per column header and total
+  // row: amounts carry no symbol prefix, and stored Rial scales for display only.
+  const displayUnit = resolveCurrencyDisplayUnit(
+    currencyCode,
+    resolveStoredCurrencyDisplay(tenant.currency_display ?? undefined, tenant.country ?? ''),
+  );
+  const currency = displayUnit ? '' : symbolCurrency;
+  const unitLabel = displayUnit?.label ?? null;
+  const unitScale = displayUnit?.scale ?? 1;
+  const summaryAmount = (value: number | string): string =>
+    formatAmount(value, currency, locale, opts.trimDecimals === true, fractionDigits, unitLabel, unitScale);
   const taxIdLabel = getCountryByCode(tenant.country)?.taxIdLabel || 'Tax ID';
   const order = bill.order;
   const taxComponents = resolveTaxComponents(bill);
@@ -921,7 +961,7 @@ export function buildDetailedReceiptBytes(
 
   // Subtotal (excl. tax)
   enc
-    .text(padRow('Subtotal (excl. tax)', formatAmount(bill.subtotal, currency, locale, trimDecimals, fractionDigits), cols))
+    .text(padRow('Subtotal (excl. tax)', summaryAmount(bill.subtotal), cols))
     .newline();
 
   enc.rule({ style: 'single' });
@@ -929,17 +969,17 @@ export function buildDetailedReceiptBytes(
   if (showTaxBreakdown && taxComponents.length > 0) {
     for (const component of taxComponents) {
       enc
-        .text(padRow(` ${formatTaxComponentLabel(component)}`, formatAmount(component.amount, currency, locale, trimDecimals, fractionDigits), cols))
+        .text(padRow(` ${formatTaxComponentLabel(component)}`, summaryAmount(component.amount), cols))
         .newline();
     }
   } else if (Number(bill.tax_amount) > 0) {
-    enc.text(padRow('Tax', formatAmount(bill.tax_amount, currency, locale, trimDecimals, fractionDigits), cols)).newline();
+    enc.text(padRow('Tax', summaryAmount(bill.tax_amount), cols)).newline();
   }
 
   enc.rule({ style: 'double' });
   enc
     .bold(true)
-    .text(padRow('TOTAL', formatAmount(bill.total, currency, locale, trimDecimals, fractionDigits), cols))
+    .text(padRow('TOTAL', summaryAmount(bill.total), cols))
     .bold(false)
     .newline();
   enc.rule({ style: 'single' });
@@ -947,7 +987,7 @@ export function buildDetailedReceiptBytes(
   // Payment methods
   if (bill.payment_details && bill.payment_details.length > 0) {
     for (const p of bill.payment_details) {
-      enc.text(padRow(capitalize(p.method), formatAmount(p.amount, currency, locale, trimDecimals, fractionDigits), cols)).newline();
+      enc.text(padRow(capitalize(p.method), summaryAmount(p.amount), cols)).newline();
     }
   }
 
@@ -989,9 +1029,20 @@ function truncateForLanguage(str: string, max: number, language?: string, capabi
   return normalized.length > max ? normalized.slice(0, max - 1) + '\u2026' : normalized;
 }
 
-function formatAmount(value: number | string, currency: string, locale: string, trimDecimals: boolean = false, fractionDigits: number = 2): string {
+/** Amount column header: declares the suffix unit once so item rows stay numeric-only. */
+function amountHeaderLabel(base: string, unit: string | null): string {
+  return unit ? `${base} (${unit})` : base;
+}
+
+/**
+ * Amount text: `unit` selects suffix display (the unit word follows the number
+ * and no symbol prefix is printed) and `scale` converts stored amounts for
+ * display only. Omitted keeps the symbol-prefix layout.
+ */
+function formatAmount(value: number | string, currency: string, locale: string, trimDecimals: boolean = false, fractionDigits: number = 2, unit: string | null = null, scale: number = 1): string {
   const amount = Number(value);
-  const numeric = Number.isFinite(amount) ? amount : 0;
+  const raw = Number.isFinite(amount) ? amount : 0;
+  const numeric = scale === 1 ? raw : raw * scale;
   const factor = 10 ** fractionDigits;
   const hasDecimals = Math.round(numeric * factor) % factor !== 0;
   const safeLocale = getSafeLatnLocale(locale);
@@ -999,5 +1050,5 @@ function formatAmount(value: number | string, currency: string, locale: string, 
     minimumFractionDigits: trimDecimals && !hasDecimals ? 0 : fractionDigits,
     maximumFractionDigits: fractionDigits,
   }).replace(/[\u00A0\u202F]/g, ' ');
-  return `${currency}${formattedNum}`;
+  return unit ? `${formattedNum} ${unit}` : `${currency}${formattedNum}`;
 }

@@ -18,7 +18,13 @@ import { createTranslator } from 'use-intl/core';
 import { getCachedMessages, loadLocaleMessages } from '@/lib/i18n/loader';
 import { LANGUAGES, getLanguageDirection, type Language } from '@/lib/i18n/languages';
 import { usePosSettingsStore } from '@/store/pos-settings';
-import { getCountryByCode, getCurrencySymbol, resolveTenantCurrency } from '@countries';
+import {
+  getCountryByCode,
+  getCurrencySymbol,
+  resolveCurrencyDisplayUnit,
+  resolveStoredCurrencyDisplay,
+  resolveTenantCurrency,
+} from '@countries';
 import { resolveTaxComponents } from './tax-components';
 import type { Bill, Order, OrderItem } from '@/lib/types';
 
@@ -214,6 +220,8 @@ export interface FrontendTenantPrefs {
   currency?: string | null;
   country?: string | null;
   timezone?: string | null;
+  /** Stored regional display preference (e.g. `toman`); never a stored amount. */
+  currency_display?: string | null;
 }
 
 export function buildBillPrintContext(opts: {
@@ -233,6 +241,10 @@ export function buildBillPrintContext(opts: {
     locale: LANGUAGES[opts.languages[0] as Language]?.locale ?? country?.locale ?? 'en-US',
     currency,
     currencySymbol: getCurrencySymbol(currency, country?.locale ?? 'en-US'),
+    currencyUnit: resolveCurrencyDisplayUnit(
+      currency,
+      resolveStoredCurrencyDisplay(opts.tenant.currency_display ?? undefined, country?.code ?? ''),
+    ),
     trimDecimals: opts.trimDecimals === true,
     ...(opts.tenant.timezone ? { timezone: String(opts.tenant.timezone) } : {}),
     resolveLabel: printLabelResolver,

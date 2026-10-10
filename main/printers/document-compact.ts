@@ -39,6 +39,7 @@ import {
   type TotalsBlock,
   layoutStyledUnit,
   paymentDisplayRows,
+  type SuffixAmountUnit,
   type ThermalLayoutContext,
 } from '../../shared/print';
 
@@ -53,6 +54,8 @@ export interface CompactDocumentRenderOptions {
   /** Currency prefix preference (symbol + unicode mode). */
   readonly currency: string;
   readonly currencySymbol: string;
+  /** Suffix amount unit (e.g. `تومان`) when the tenant displays a unit word instead of a symbol. */
+  readonly currencyUnit?: SuffixAmountUnit | null;
   readonly trimDecimals: boolean;
   readonly useUnicode: boolean;
   readonly arabicShaping: boolean;
@@ -92,8 +95,7 @@ function compactBannerLines(label: SemanticLabel, context: ThermalLayoutContext)
 }
 
 /** Column header row, composed from the document's own header labels. */
-function compactItemHeader(block: ItemTableBlock, nameLen: number, amtLen: number, language: string, capabilities?: ThermalPrinterCapabilities): string {
-  const qtyW = 4;
+function compactItemHeader(block: ItemTableBlock, nameLen: number, amtLen: number, qtyW: number, language: string, capabilities?: ThermalPrinterCapabilities): string {
   const itemLabel = normalizeThermalText(labelOf(block.header.item), capabilities);
   const qtyLabel = normalizeThermalText(labelOf(block.header.quantity), capabilities);
   const amountLabel = normalizeThermalText(labelOf(block.header.amount), capabilities);
@@ -130,6 +132,14 @@ export function renderBillDocumentToCompactLines(
   const bar = '='.repeat(cols);
   const dash = '-'.repeat(cols);
   const normalize = (text: string): string => normalizeThermalText(text, options.capabilities);
+  // Suffix-unit display (e.g. Toman) declares the unit once — in the amount
+  // column header and in each summary row — so item rows stay numeric-only.
+  const unit = options.currencyUnit ?? null;
+  const amountPrefix = unit ? '' : prefix;
+  // Stored amounts are canonical; the suffix unit scales them for display only.
+  const displayAmount = (value: number): number => (unit && unit.scale !== 1 ? value * unit.scale : value);
+  const summaryAmount = (value: number): string =>
+    formatCurrency(displayAmount(value), amountPrefix, options.locale, trimDecimals, fractionDigits, unit?.label ?? null);
   const markGroup = (groupId: string, start: number, sourceLines?: readonly string[], sourceControlLines?: readonly string[], financial = false, sourceLayouts?: readonly (RasterTextLayout | undefined)[]): void => {
     if (options.rasterGroups && lines.length > start) options.rasterGroups.push({ groupId, lineIndex: start, lineCount: lines.length - start, ...(sourceLines ? { sourceLines } : {}), ...(sourceControlLines ? { sourceControlLines } : {}), ...(sourceLayouts ? { sourceLayouts } : {}), ...(financial ? { financial: true } : {}) });
   };
@@ -225,35 +235,45 @@ export function renderBillDocumentToCompactLines(
 
   // Item table.
   if (items) {
-    const amtLen = itemAmountWidth(
-      { items: items.rows.map((row) => ({ total: row.amount, addons: row.addons.map((addon) => ({ price: addon.price })) })) },
-      prefix,
-      options.locale,
-      trimDecimals,
-      cols,
-      fractionDigits,
+    // A suffix unit widens the quantity header to its whole label so the
+    // column reads as `تعداد` instead of a clipped stem.
+    const qtyWidth = unit ? Math.max(4, labelOf(items.header.quantity).length) : 4;
+    const amtLen = Math.max(
+      itemAmountWidth(
+        { items: items.rows.map((row) => ({ total: displayAmount(row.amount), addons: row.addons.map((addon) => ({ price: displayAmount(addon.price) })) })) },
+        amountPrefix,
+        options.locale,
+        trimDecimals,
+        cols,
+        fractionDigits,
+        qtyWidth,
+      ),
+      // The unit-bearing header must fit the amount column, otherwise it is
+      // truncated mid-word and the rows lose their declared unit.
+      unit ? Math.min(labelOf(items.header.amount).length + 1, Math.max(1, cols - qtyWidth - 1)) : 0,
     );
-    const nameLen = itemNameWidth(cols, amtLen);
-    lines.push(compactItemHeader(items, nameLen, amtLen, options.language, options.capabilities));
+    const nameLen = itemNameWidth(cols, amtLen, qtyWidth);
+    lines.push(compactItemHeader(items, nameLen, amtLen, qtyWidth, options.language, options.capabilities));
     lines.push(dash);
 
     for (const [rowIndex, row] of items.rows.entries()) {
       const rowStart = lines.length;
       const rowLines = itemRows(
-        { product_name: row.name.text, quantity: row.quantity, total: row.amount },
+        { product_name: row.name.text, quantity: row.quantity, total: displayAmount(row.amount) },
         nameLen,
         amtLen,
         cols,
-        prefix,
+        amountPrefix,
         options.locale,
         trimDecimals,
         options.language,
         fractionDigits,
         options.capabilities,
+        qtyWidth,
       );
       lines.push(...rowLines);
       recordFinancialLines(rowStart, rowLines);
-      const amount = formatCurrency(row.amount, prefix, options.locale, trimDecimals, fractionDigits);
+      const amount = formatCurrency(displayAmount(row.amount), amountPrefix, options.locale, trimDecimals, fractionDigits);
       const sourceLines = [`${row.name.text} ${row.quantity} ${amount}`];
       const sourceControlLines = [rowLines[0] ?? ''];
       const sourceLayouts: Array<RasterTextLayout | undefined> = [{
@@ -266,13 +286,13 @@ export function renderBillDocumentToCompactLines(
       }];
       const financialSourceLines = [true];
       for (const addon of row.addons) {
-        const addonLines = addonRows({ name: addon.name.text, price: addon.price, quantity: addon.quantity }, nameLen, amtLen, cols, prefix, options.locale, trimDecimals, options.language, fractionDigits, options.capabilities);
+        const addonLines = addonRows({ name: addon.name.text, price: displayAmount(addon.price), quantity: addon.quantity }, nameLen, amtLen, cols, amountPrefix, options.locale, trimDecimals, options.language, fractionDigits, options.capabilities);
         const addonStart = lines.length;
         lines.push(...addonLines);
         if (addon.price) recordFinancialLines(addonStart, addonLines);
         const quantitySuffix = (addon.quantity ?? 1) > 1 ? ` x${addon.quantity}` : '';
         const addonLabel = `  + ${addon.name.text}${quantitySuffix}`;
-        const addonAmount = addon.price ? formatCurrency(addon.price, prefix, options.locale, trimDecimals, fractionDigits) : '';
+        const addonAmount = addon.price ? formatCurrency(displayAmount(addon.price), amountPrefix, options.locale, trimDecimals, fractionDigits) : '';
         sourceLines.push(`${addonLabel}${addon.price ? ` ${addonAmount}` : ''}`);
         sourceControlLines.push(addonLines[0] ?? '');
         sourceLayouts.push(addon.price ? {
@@ -322,10 +342,10 @@ export function renderBillDocumentToCompactLines(
     } : undefined);
   };
   if (totals) {
-    const subtotalValue = formatCurrency(totals.subtotal.amount, prefix, options.locale, trimDecimals, fractionDigits);
+    const subtotalValue = summaryAmount(totals.subtotal.amount);
     pushTotalRow(financialRows(labelOf(totals.subtotal.label), subtotalValue, cols, options.language, options.capabilities), false, labelOf(totals.subtotal.label), subtotalValue);
     if (totals.discount) {
-      const discountValue = '-' + formatCurrency(totals.discount.amount, prefix, options.locale, trimDecimals, fractionDigits);
+      const discountValue = '-' + summaryAmount(totals.discount.amount);
       pushTotalRow(financialRows(labelOf(totals.discount.label), discountValue, cols, options.language, options.capabilities), false, labelOf(totals.discount.label), discountValue);
     }
     if (breakdown && breakdown.lines.length > 0) {
@@ -333,26 +353,26 @@ export function renderBillDocumentToCompactLines(
         const rateSuffix = line.rate === null ? '' : ` @${line.rate}%`;
         const rawLabel = labelOf(line.label) + rateSuffix;
         const label = truncate(rawLabel, cols - 12, options.language, options.capabilities);
-        const value = formatCurrency(line.amount, prefix, options.locale, trimDecimals, fractionDigits);
+        const value = summaryAmount(line.amount);
         pushTotalRow(financialRows(label, value, cols, options.language, options.capabilities), false, rawLabel, value);
       }
     } else if (totals.tax) {
-      const value = formatCurrency(totals.tax.amount, prefix, options.locale, trimDecimals, fractionDigits);
+      const value = summaryAmount(totals.tax.amount);
       pushTotalRow(financialRows(labelOf(totals.tax.label), value, cols, options.language, options.capabilities), false, labelOf(totals.tax.label), value);
     }
     if (totals.serviceCharge) {
-      const value = formatCurrency(totals.serviceCharge.amount, prefix, options.locale, trimDecimals, fractionDigits);
+      const value = summaryAmount(totals.serviceCharge.amount);
       pushTotalRow(financialRows(labelOf(totals.serviceCharge.label), value, cols, options.language, options.capabilities), false, labelOf(totals.serviceCharge.label), value);
     }
     if (totals.deliveryCharge) {
-      const value = formatCurrency(totals.deliveryCharge.amount, prefix, options.locale, trimDecimals, fractionDigits);
+      const value = summaryAmount(totals.deliveryCharge.amount);
       pushTotalRow(financialRows(labelOf(totals.deliveryCharge.label), value, cols, options.language, options.capabilities), false, labelOf(totals.deliveryCharge.label), value);
     }
     if (totals.packagingCharge) {
-      const value = formatCurrency(totals.packagingCharge.amount, prefix, options.locale, trimDecimals, fractionDigits);
+      const value = summaryAmount(totals.packagingCharge.amount);
       pushTotalRow(financialRows(labelOf(totals.packagingCharge.label), value, cols, options.language, options.capabilities), false, labelOf(totals.packagingCharge.label), value);
     }
-    const grandTotalValue = formatCurrency(totals.grandTotal.amount, prefix, options.locale, trimDecimals, fractionDigits);
+    const grandTotalValue = summaryAmount(totals.grandTotal.amount);
     pushTotalRow(financialRows(labelOf(totals.grandTotal.label), grandTotalValue, cols, options.language, options.capabilities), true, labelOf(totals.grandTotal.label), grandTotalValue);
   }
   markGroup('totals', totalsStart, totalsSourceLines, totalsSourceControlLines, true, totalsSourceLayouts);
@@ -369,7 +389,7 @@ export function renderBillDocumentToCompactLines(
     paymentSourceLayouts.push(undefined);
     const pushPaymentRow = (rawLabel: string, amount: number): void => {
       const methodLabel = truncate(rawLabel, cols - 12, options.language, options.capabilities);
-      const value = formatCurrency(amount, prefix, options.locale, trimDecimals, fractionDigits);
+      const value = summaryAmount(amount);
       const rendered = financialRows(methodLabel, value, cols, options.language, options.capabilities);
       recordFinancialLines(lines.length, rendered);
       lines.push(...rendered);
@@ -485,6 +505,7 @@ export function renderCompactReceiptViaDocument(
     ...(printContext.timezone !== undefined ? { timezone: printContext.timezone } : {}),
     currency: printContext.currency,
     currencySymbol: printContext.currencySymbol,
+    currencyUnit: printContext.currencyUnit ?? null,
     trimDecimals: printContext.trimDecimals,
     useUnicode: opts.useUnicode,
     arabicShaping: opts.arabicShaping,

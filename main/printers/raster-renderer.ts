@@ -99,6 +99,28 @@ export function rasterRendererHtml(): string {
               const allocated = columns.map((c) => Math.max(1, Math.round(available * c.widthRatio)));
               const totalAllocated = allocated.reduce((sum, w) => sum + w, 0);
               allocated[0] = Math.max(1, allocated[0] + (available - totalAllocated));
+              // Ratio shares are counted in display cells while text is measured
+              // in pixels, so a long value (e.g. '140,000.00 تومان') can exceed
+              // its share. Cover the deficit from columns whose text already
+              // fits so units wrap only when the line genuinely cannot fit.
+              const measuredWidths = columns.map((column) => measure(column.text));
+              for (let i = 0; i < columns.length; i += 1) {
+                const deficit = measuredWidths[i] - allocated[i];
+                if (deficit <= 0) continue;
+                let room = 0;
+                for (let j = 0; j < columns.length; j += 1) {
+                  if (j !== i) room += Math.max(0, allocated[j] - measuredWidths[j]);
+                }
+                if (room <= 0) continue;
+                let give = Math.min(deficit, room);
+                allocated[i] += give;
+                for (let j = 0; j < columns.length && give > 0; j += 1) {
+                  if (j === i) continue;
+                  const take = Math.min(Math.max(0, allocated[j] - measuredWidths[j]), give);
+                  allocated[j] -= take;
+                  give -= take;
+                }
+              }
               return allocated;
             })()
             : (columns.length === 2

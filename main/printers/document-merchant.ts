@@ -59,6 +59,7 @@ export function renderMerchantReceiptViaDocument(
     ...(printContext.timezone !== undefined ? { timezone: printContext.timezone } : {}),
     currency: printContext.currency,
     currencySymbol: printContext.currencySymbol,
+    currencyUnit: printContext.currencyUnit ?? null,
     trimDecimals: printContext.trimDecimals,
     useUnicode: opts.useUnicode,
     arabicShaping: opts.arabicShaping,
