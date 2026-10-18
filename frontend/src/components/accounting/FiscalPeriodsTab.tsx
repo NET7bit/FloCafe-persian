@@ -28,6 +28,7 @@ export default function FiscalPeriodsTab({ periods, loading, error, onRefresh }:
   const { currentTenant } = useAuthStore();
 
   const businessDate = businessDateForInstant({
+    instant: new Date(),
     timezone: currentTenant?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
     startTime: currentTenant?.business_day_start_time,
   });

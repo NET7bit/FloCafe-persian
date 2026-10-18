@@ -1,12 +1,14 @@
 import { Express } from 'express';
 import { authRoutes } from './auth';
 import { requireAnyPermission, requirePermission } from '../services/authorization';
+import { requireRole } from '../middleware/security';
+import { ROLE_ACCESS, hasRole } from '../../shared/role-permissions';
 import { categoryRoutes } from './categories';
 import { productRoutes } from './products';
 import { addonGroupRoutes } from './addon-groups';
 import { orderRoutes } from './orders';
 import { orderItemRoutes } from './order-items';
-import { billRoutes } from './bills';
+import { billRoutes, syncUnpaidBillsForOrder, getTenantCurrency } from './bills';
 import { refundRoutes } from './refunds';
 import { cashClosureRoutes } from './cash-closures';
 import { cashSessionRoutes } from './cash-sessions';
@@ -45,7 +47,10 @@ import { whatsappRoutes } from './whatsapp';
 import { supportTicketRoutes } from './support-ticket';
 import { diagnosticsRoutes } from './diagnostics';
 import { authorizationRoutes } from './authorization';
-import { getDatabase, getSettingValue, getCachedPairingCode, setCachedPairingCode } from '../db';
+import { notifyKdsUpdate } from '../services/kds';
+import { getDatabase, getSettingValue, getCachedPairingCode, setCachedPairingCode, now, parseItemJson, attachEffectiveAddons, withTxn, verifyPin, recordOrderAudit } from '../db';
+import { checkPinRateLimit } from './orders';
+import { getCurrencyFractionDigits, getCurrencyMinorUnitFactor } from '../countries';
 
 const OWNER_MANAGER_ROLE_PLACEHOLDERS = ROLE_ACCESS.ownerManager.map(() => '?').join(', ');
 import {
@@ -82,6 +87,7 @@ function mobilePairingErrorMessage(error: any): string {
 }
 
 const inlineCustomerLookupRateLimit = expressRateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: true, legacyHeaders: false });
+const inlineOrderWriteRateLimit = expressRateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
 
 export function registerRoutes(app: Express): void {
   // Auth routes

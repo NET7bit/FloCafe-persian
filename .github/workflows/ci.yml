@@ -376,7 +376,7 @@ jobs:
   # tests/ci-required-checks.test.cjs pins this list; update both together.
   required-checks-gate:
     name: Required Checks Gate
-    needs: [changes, dependency-review, linux-baseline, linux-tests, tax-category-invariant, e2e-playwright, native-e2e-playwright, windows-uninstaller]
+    needs: [changes, dependency-review, docs-checks, linux-baseline, linux-tests, tax-category-invariant, e2e-playwright, native-e2e-playwright, windows-uninstaller]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -395,7 +395,7 @@ jobs:
           if [ "$changes_result" != "success" ]; then
             offenders="$changes_result"
           fi
-          for result in "${{ needs.dependency-review.result }}" "${{ needs.linux-baseline.result }}" "${{ needs.linux-tests.result }}" "${{ needs.tax-category-invariant.result }}" "${{ needs.e2e-playwright.result }}" "${{ needs.native-e2e-playwright.result }}" "${{ needs.windows-uninstaller.result }}"; do
+          for result in "${{ needs.dependency-review.result }}" "${{ needs.docs-checks.result }}" "${{ needs.linux-baseline.result }}" "${{ needs.linux-tests.result }}" "${{ needs.tax-category-invariant.result }}" "${{ needs.e2e-playwright.result }}" "${{ needs.native-e2e-playwright.result }}" "${{ needs.windows-uninstaller.result }}"; do
             if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
               offenders="$offenders $result"
             fi

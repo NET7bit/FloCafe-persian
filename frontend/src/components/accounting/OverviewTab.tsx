@@ -75,6 +75,7 @@ export default function OverviewTab({ onNavigate }: OverviewTabProps) {
   }, [reloadKey]);
 
   const businessDate = businessDateForInstant({
+    instant: new Date(),
     timezone: currentTenant?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
     startTime: currentTenant?.business_day_start_time,
   });

@@ -201,5 +201,15 @@
   "test:migration-convergence",
   "test:startup-restore",
   "test:accounting-reports",
+  "test:menu-surface",
+  "test:telemetry-install-provenance",
+  "test:order-item-cancel-restore",
+  "test:order-totals-recompute",
+  "test:authorization-permissions",
+  "test:delivery-slip",
+  "test:delivery-address",
+  "test:business-date",
+  "test:dashboard-business-date",
+  "test:issue-646-floor-management",
   "test:accounting-ui"
 ]

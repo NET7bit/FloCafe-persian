@@ -111,6 +111,9 @@ export function buildBillPrintData(order: any, bill: any, business: any, isRepri
       tableName: String(order?.table?.name ?? ''),
       onlinePlatform: String(order?.online_platform ?? ''),
       externalOrderId: String(order?.external_order_id ?? ''),
+      // Required by the upstream OrderSnapshot contract; the classic template
+      // does not render it yet, but the snapshot must carry the captured value.
+      deliveryAddress: String(order?.delivery_address ?? ''),
       items: items.map((item: any) => ({
         productName: String(item?.product_name ?? ''),
         quantity: Number(item?.quantity) || 0,

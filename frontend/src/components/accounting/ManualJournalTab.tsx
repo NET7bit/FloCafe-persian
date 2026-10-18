@@ -50,6 +50,7 @@ export default function ManualJournalTab({ periods }: { periods: FiscalPeriod[] 
   const canPost = hasRole(currentTenant?.role, ROLE_ACCESS.owner);
 
   const businessDate = businessDateForInstant({
+    instant: new Date(),
     timezone: currentTenant?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
     startTime: currentTenant?.business_day_start_time,
   });
