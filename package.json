@@ -99,7 +99,7 @@
     "test:authz-phase3": "node tests/run-electron-node-test.cjs tests/authz-matrix-phase3.test.ts",
     "test:authorization-permissions": "ts-node --transpile-only -P tests/tsconfig.json tests/permission-label-i18n.test.ts && ts-node --transpile-only -P tests/tsconfig.json tests/permission-matrix-self-access.test.ts && node tests/run-electron-node-test.cjs tests/authorization-permissions.test.ts && node tests/run-electron-node-test.cjs tests/authorization-api.test.ts && node tests/run-electron-node-test.cjs tests/authorization-static-audit.test.ts && node tests/run-electron-node-test.cjs tests/static-audit-posix-paths.test.ts",
     "test:customer-auth": "node tests/run-electron-node-test.cjs tests/customer-auth.test.ts",
-    "test:backup": "ts-node --transpile-only -P tests/tsconfig.json tests/backup-restore.test.ts && node tests/run-electron-node-test.cjs tests/backup-restore-production.test.ts && node tests/run-electron-node-test.cjs tests/restore-managed-path.test.ts && ts-node --transpile-only -P tests/tsconfig.json tests/import-restore-atomicity.test.ts",
+    "test:backup": "ts-node --transpile-only -P tests/tsconfig.json tests/backup-restore.test.ts && node tests/run-electron-node-test.cjs tests/backup-restore-production.test.ts && node tests/run-electron-node-test.cjs tests/restore-managed-path.test.ts && ts-node --transpile-only -P tests/tsconfig.json tests/import-restore-atomicity.test.ts && node tests/run-electron-node-test.cjs tests/windows-backup-unlink-ebusy.test.ts && node tests/run-electron-node-test.cjs tests/restore-safety-copy.test.ts && node tests/run-electron-node-test.cjs tests/restore-from-file-api.test.ts",
     "test:fk-recovery-hardening": "ts-node --transpile-only -P tests/tsconfig.json tests/fk-recovery-hardening.test.ts",
     "test:fk-write-gate": "ts-node --transpile-only -P tests/tsconfig.json tests/fk-write-gate.test.ts",
     "test:kds-fk-write-gate": "ts-node --transpile-only -P tests/tsconfig.json tests/kds-fk-write-gate.test.ts",
@@ -296,7 +296,13 @@
     "test:migration-convergence": "node tests/run-electron-node-test.cjs tests/migration-convergence-spec.test.ts",
     "test:startup-restore": "node tests/run-electron-node-test.cjs tests/startup-restore.test.ts",
     "test:accounting-reports": "node tests/run-electron-node-test.cjs tests/accounting-reports.test.ts",
-    "test:accounting-ui": "ts-node --transpile-only -P tests/tsconfig.json tests/accounting-ui.test.ts"
+    "test:accounting-ui": "ts-node --transpile-only -P tests/tsconfig.json tests/accounting-ui.test.ts",
+    "test:receipt-column-oracle": "ts-node --transpile-only -P tests/tsconfig.json tests/receipt-column-oracle.test.ts",
+    "test:jwt-secret-cache-identity": "node tests/run-electron-node-test.cjs tests/jwt-secret-cache-identity.test.ts",
+    "test:jwt-secret-persist-before-cache": "node tests/run-electron-node-test.cjs tests/jwt-secret-persist-before-cache.test.ts",
+    "test:kitchen-delivery-enforcement": "node tests/run-electron-node-test.cjs tests/kitchen-delivery-enforcement.test.ts",
+    "test:migration-registry": "node tests/run-electron-node-test.cjs tests/migration-registry.test.ts",
+    "test:import-restore-y1-y2-hardening": "ts-node --transpile-only -P tests/tsconfig.json tests/import-restore-y1-y2-hardening.test.ts"
   },
   "author": {
     "name": "Flo",

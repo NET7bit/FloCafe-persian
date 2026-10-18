@@ -105,3 +105,17 @@ metadata. Do not move them without a coordinated change to those references.
 
 - [`images/flo-cafe-pos.webp`](images/flo-cafe-pos.webp): the POS screenshot used in `README.md`
   and in the Linux AppStream metadata. Do not move it.
+
+## Fork extensions
+
+Documents this fork keeps alongside the shared tree. They describe functionality that only exists
+here (suppliers, purchase invoices, receivables, expenses, fiscal periods, the accounting core and
+COGS), so they are deliberately not part of the shared architecture/reference structure above.
+
+| Document | Subject |
+| --- | --- |
+| [operations-runbook.md](operations-runbook.md) | Operator runbook: daily health, backup/retention, log locations, incident playbook, LAN trust boundary, restore rehearsal, and the restaurant-day UAT procedure. |
+| [accounting-architecture-plan.md](accounting-architecture-plan.md) | Accounting v1 architecture (approved stages 2–5): seeded chart of accounts, append-only journals with derived balances, fiscal-gated insert paths, module adapters, reports and reconciliation. |
+| [accounting-current-state.md](accounting-current-state.md) | Inspect-only survey of the pre-accounting money model: legacy sales core versus the fork's financial modules, with a repository evidence table. |
+| [accounting-milestone-plan.md](accounting-milestone-plan.md) | Planning-only milestone plan for Accounting v1; delivered through the accounting implementation stages. |
+| [accounting-scope-review.md](accounting-scope-review.md) | Scope boundary review splitting accounting capabilities into v1 / later / out of scope. |

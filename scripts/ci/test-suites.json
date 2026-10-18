@@ -211,5 +211,11 @@
   "test:business-date",
   "test:dashboard-business-date",
   "test:issue-646-floor-management",
+  "test:receipt-column-oracle",
+  "test:jwt-secret-cache-identity",
+  "test:jwt-secret-persist-before-cache",
+  "test:kitchen-delivery-enforcement",
+  "test:migration-registry",
+  "test:import-restore-y1-y2-hardening",
   "test:accounting-ui"
 ]
