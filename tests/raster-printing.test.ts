@@ -575,6 +575,37 @@ async function run(): Promise<void> {
     ['1', 'left'],
     ['₹12.34', 'right'],
   ]);
+  // A supplied layout is presentation, so the item table header row takes the
+  // same columns as the money rows it labels — and its own base direction.
+  const labelLayoutRequests: any[] = [];
+  await renderUnsupportedRasterLines({
+    render: async (rasterRequest) => {
+      labelLayoutRequests.push(rasterRequest);
+      return { version: 1 as const, requestId: (rasterRequest as any).requestId, ok: true as const, unit: { ...unit, unitId: (rasterRequest as any).requestId, financial: false } };
+    },
+  }, ['اقلام تعداد مبلغ'], caps, 'item-table-header', [
+    {
+      groupId: 'item-table-header',
+      lineIndex: 0,
+      lineCount: 1,
+      sourceLines: ['اقلام تعداد مبلغ'],
+      sourceControlLines: ['اقلام تعداد مبلغ'],
+      sourceLayouts: [{
+        kind: 'financial-item',
+        direction: 'rtl',
+        columns: [
+          { text: 'اقلام', align: 'left', widthRatio: 25 / 42 },
+          { text: 'تعداد', align: 'left', widthRatio: 4 / 42 },
+          { text: 'مبلغ', align: 'right', widthRatio: 13 / 42 },
+        ],
+      }],
+      financialSourceLines: [false],
+    },
+  ]);
+  assert.equal(labelLayoutRequests[0].layout.direction, 'rtl');
+  assert.equal(labelLayoutRequests[0].direction, 'rtl');
+  assert.equal(labelLayoutRequests[0].financial, false);
+  assert.deepEqual(labelLayoutRequests[0].layout.columns.map((column: any) => column.text), ['اقلام', 'تعداد', 'مبلغ']);
   const digitNamedFinancialRequests: any[] = [];
   await renderUnsupportedRasterLines({
     render: async (rasterRequest) => {

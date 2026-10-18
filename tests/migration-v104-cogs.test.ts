@@ -22,7 +22,8 @@ Module._load = function (request: string, parent: unknown, isMain: boolean) {
 
 const { MIGRATIONS } = require('../main/db');
 const TARGET_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;
-const target = MIGRATIONS.find((m: any) => m.version === TARGET_VERSION);
+// Locate by name (not version) so the lookup survives migration renumbering.
+const target = MIGRATIONS.find((m: any) => m.name === 'add_cogs_accounting');
 
 let passed = 0;
 let failed = 0;
@@ -46,7 +47,7 @@ function getDb(): any {
 async function main() {
   console.log(`Migration v${TARGET_VERSION} (add_cogs_accounting) test`);
   console.log('='.repeat(52));
-  assertEqual(TARGET_VERSION, 104, 'the last migration is v104');
+  assertEqual(!!target, true, 'the add_cogs_accounting migration is registered');
   assertEqual(target.name, 'add_cogs_accounting', 'the migration is named add_cogs_accounting');
 
   // ── Fresh install: all migrations from v1 ──

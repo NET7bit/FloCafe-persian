@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import Database from 'better-sqlite3';
-import { captureKitchenStationSecurityState, captureKdsEnabledSetting, captureRestoreProtectedSettings, captureUserSecurityState, captureUserStationSecurityState, clearGoogleDriveRestoreBinding, getDatabase, getDbPath, createBackup, createBackupUnlocked, getCurrentSchemaVersion, getForeignKeyViolationKeys, getInventoryMovementRows, isSafeIdentifier, mergeKdsEnabledSetting, mergeRestoreProtectedSettings, mergeUserSecurityState, mergeUserStationSecurityState, now, throwIfDatabaseMaintenanceAborted, validateInventoryLedgerDatabase, validateInventoryLedgerReplacement, validateInventoryLedgerRows, withTxn, withDatabaseMaintenanceLock } from '../db';
+import { captureKitchenStationSecurityState, captureKdsEnabledSetting, captureRestoreProtectedSettings, captureUserSecurityState, captureUserStationSecurityState, clearGoogleDriveRestoreBinding, getDatabase, getDbPath, createBackup, createBackupUnlocked, getCurrentSchemaVersion, getForeignKeyViolationKeys, getInventoryMovementRows, isSafeIdentifier, mergeKdsEnabledSetting, mergeRestoreProtectedSettings, mergeUserSecurityState, mergeUserStationSecurityState, now, recoverForeignKeyEnforcement, throwIfDatabaseMaintenanceAborted, validateInventoryLedgerDatabase, validateInventoryLedgerReplacement, validateInventoryLedgerRows, withTxn, withDatabaseMaintenanceLock } from '../db';
 import { clearInMemoryRevokedTokens, clearUserAuthCache, requireRole } from '../middleware/security';
 import { requireMasterPin } from '../middleware/master-pin';
 import { clearJWTSecretCache } from './auth';
@@ -261,6 +261,10 @@ router.post('/import', requireRole(...ROLE_ACCESS.owner),
 
     const previousForeignKeys = Number(db.pragma('foreign_keys', { simple: true })) === 1;
     db.pragma('foreign_keys = OFF');
+    // Tracks whether COMMIT succeeded so post-commit errors can be told apart
+    // from real transaction failures (Y-1 Option A).
+    let committed = false;
+    let placeholderUsersCreated = 0;
 
     try {
       throwIfDatabaseMaintenanceAborted(signal);
@@ -392,7 +396,7 @@ router.post('/import', requireRole(...ROLE_ACCESS.owner),
         console.log(`[DB Import] ${tableName}: ${rows.length} rows (${commonCols.length} columns)`);
       }
       
-      const placeholderUsersCreated = restoreRedactedUserPlaceholders(db, importedUserRows, existingUserIds);
+      placeholderUsersCreated = restoreRedactedUserPlaceholders(db, importedUserRows, existingUserIds);
       if (placeholderUsersCreated > 0) {
         console.log(`[DB Import] Created ${placeholderUsersCreated} inactive placeholder user(s) for redacted exported accounts`);
       }
@@ -424,41 +428,99 @@ router.post('/import', requireRole(...ROLE_ACCESS.owner),
       throwIfDatabaseMaintenanceAborted(signal);
       clearGoogleDriveRestoreBinding(db);
       db.exec('COMMIT');
-      const cleanup = googleDrive.completeDatabaseRestore();
+      committed = true;
+      } catch (err: any) {
+        // Roll back only when the transaction was not already committed. Once
+        // COMMIT has succeeded there is nothing to roll back; a post-commit
+        // error must not be turned into a failed import (see Y-1 Option A).
+        try { if (!committed) db.exec('ROLLBACK'); } catch { }
+        throw err;
+      }
+    } finally {
+      // Restoring the connection's foreign_keys state must never turn a COMMITTED
+      // import into a failed one. By the time this runs, `committed` is already
+      // true on the success path and the data is durable, so the failure can only
+      // be logged — and swallowing it here also stops the finally's error from
+      // masking the original transaction error on the pre-commit failure path.
+      // The connection's foreign_keys state may therefore differ from its
+      // pre-transaction value; that is reported explicitly, never assumed healthy.
+      try {
+        db.pragma(`foreign_keys = ${previousForeignKeys ? 'ON' : 'OFF'}`);
+      } catch (pragmaError) {
+        console.error(
+          '[DB Import] foreign_keys restore failed at transaction end (import is committed if COMMIT ran; ' +
+            'the connection\'s foreign_keys state may not match its pre-transaction value):',
+          pragmaError,
+        );
+      }
+      // Re-verify enforcement on the live connection after the transaction and
+      // record the FK health component. The helper never throws, so a recovery
+      // failure cannot turn a committed import into a failed one.
+      try {
+        recoverForeignKeyEnforcement();
+      } catch (recoveryError) {
+        console.error('[DB Import] FK recovery threw unexpectedly (committed import unaffected):', recoveryError);
+      }
+    }
+
+    // ── Post-commit side effects (Y-1 Option A) ──────────────────────────────
+    // The transaction is committed above. Any failure here (e.g. Google Drive
+    // restore cleanup, auth-cache refresh) must NOT roll back the import — there
+    // is nothing to roll back — nor be reported as a failed import. The data is
+    // durable, so we report success and surface cleanupPending so the client can
+    // schedule follow-up cleanup.
+    if (committed) {
+      let cleanupPending = false;
+      try {
+        const cleanup = googleDrive.completeDatabaseRestore();
+        cleanupPending = cleanup.cleanupPending;
+      } catch (cleanupError) {
+        cleanupPending = true;
+        console.error('[DB Import] Post-commit restore cleanup failed:', cleanupError);
+      }
       try {
         clearUserAuthCache();
         clearInMemoryRevokedTokens();
         clearJWTSecretCache();
       } catch (cacheError: any) {
-        // Log post-commit cache cleanup failure without failing the committed import.
         console.error('[DB Import] Post-commit cache cleanup failed:', cacheError);
       }
-      res.json({ 
-        success: true, 
-        message: hasVersionMismatch 
-          ? 'Data imported with schema compatibility (some fields may be missing)'
-          : 'Database imported successfully',
-        backup: backupPath,
-        schemaVersionMismatch: hasVersionMismatch,
-        importedSchemaVersion: importSchemaVersion,
-        currentSchemaVersion: getCurrentSchemaVersion(),
-        placeholderUsersCreated,
-        cleanupPending: cleanup.cleanupPending,
-      });
-      } catch (err: any) {
-        try { db.exec('ROLLBACK'); } catch { }
-        throw err;
+      try {
+        res.json({
+          success: true,
+          message: hasVersionMismatch
+            ? 'Data imported with schema compatibility (some fields may be missing)'
+            : 'Database imported successfully',
+          backup: backupPath,
+          schemaVersionMismatch: hasVersionMismatch,
+          importedSchemaVersion: importSchemaVersion,
+          currentSchemaVersion: getCurrentSchemaVersion(),
+          placeholderUsersCreated,
+          cleanupPending,
+        });
+      } catch (responseError) {
+        // The data is committed; only emitting the response failed. Do not
+        // report HTTP 500, which would mislead the client into retrying.
+        console.error('[DB Import] Post-commit response emission failed (data is committed):', responseError);
       }
-    } finally {
-      db.pragma(`foreign_keys = ${previousForeignKeys ? 'ON' : 'OFF'}`);
     }
-    } catch (error: any) {
+  } catch (error: any) {
       console.error('[DB Import] Error:', error);
       res.status(500).json({ error: 'Import failed' });
     }
   }, getHttpRequestSignal(req));
   } finally {
-    googleDrive.releaseDatabaseRestore();
+    // Post-response release: releaseDatabaseRestore() reads the Drive replacement
+    // journal (google-drive.ts:1161) outside its own try/catch and can throw in the
+    // same way completeDatabaseRestore() does. It runs *after* the 200 has been
+    // written, so a throw here would reject asyncHandler and make Express attempt a
+    // second response on already-sent headers (ERR_HTTP_HEADERS_SENT). The import is
+    // committed and acknowledged, so the failure can only be logged (Y-1 Option A).
+    try {
+      googleDrive.releaseDatabaseRestore();
+    } catch (releaseError) {
+      console.error('[DB Import] Post-response Drive restore release failed (data is committed):', releaseError);
+    }
   }
 }));
 

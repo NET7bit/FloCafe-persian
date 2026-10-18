@@ -160,6 +160,31 @@ exit 0
 function run() {
   console.log('Testing release config + workflow integrity...');
 
+  // The promotion steps under test parse fake `gh` output with the real `jq`
+  // binary, so a missing jq fails deep inside a workflow assertion. Surface
+  // it up front instead. CI's ubuntu-latest runner preinstalls jq; local
+  // Windows developers need to add it to PATH (e.g. `winget install jqlang.jq`).
+  const prereq = childProcess.spawnSync(
+    process.platform === 'win32' ? 'bash' : '/bin/bash',
+    ['-c', "command -v jq >/dev/null 2>&1 || { echo 'jq is required to run test:release-config (promotion steps parse gh JSON with it). Install it and add it to PATH, e.g. winget install jqlang.jq.' >&2; exit 1; }"],
+    { encoding: 'utf8' }
+  );
+  // A spawn error means bash itself could not be launched; report that as the
+  // cause rather than blaming jq. A null status (terminated by signal) is not
+  // a pass — only an explicit exit 0 proves jq is available.
+  if (prereq.error) {
+    console.error(`Cannot launch bash for the jq prerequisite check: ${prereq.error.message}`);
+    process.exit(1);
+  }
+  if (prereq.status === null) {
+    console.error('The jq prerequisite check ended without a valid exit status (e.g. killed by a signal); not treating it as a pass.');
+    process.exit(1);
+  }
+  if (prereq.status !== 0) {
+    console.error(prereq.stderr || 'Missing required prerequisite jq.');
+    process.exit(1);
+  }
+
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
   const build = pkg.build;
   const releaseVerifier = require('../scripts/verify-release-assets.cjs');

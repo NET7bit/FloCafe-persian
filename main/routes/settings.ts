@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import expressRateLimit from 'express-rate-limit';
 import { getDatabase, now } from '../db';
 import { cloudSync, DEFAULT_CLOUD_SERVER_URL, normalizeCloudServerUrl } from '../services/cloud-sync';
+import { encryptSecret, isEncryptedSettingValue, maskedSecretSuffix } from '../services/secure-settings';
 import { DRIVE_RESTORE_CONFIRMATION, getGoogleDriveErrorCode, googleDrive } from '../services/google-drive';
 import { requireRole } from '../middleware/security';
 import { ROLE_ACCESS } from '../../shared/role-permissions';
@@ -102,6 +103,9 @@ const OPTIONAL_SETTING_DEFAULTS: Record<string, string> = {
 function maskSetting(key: string, value: string): string {
   if (key === 'cloud_last_error') return value ? 'Cloud service request failed' : '';
   if (!SENSITIVE_SETTING_KEYS.has(key)) return value;
+  // The cloud API key is stored as a flosec1 envelope; decrypt before masking
+  // so the visible suffix belongs to the real secret, never to ciphertext.
+  if (key === 'cloud_api_key') return maskedSecretSuffix(value);
   return value ? `****${value.slice(-4)}` : '';
 }
 
@@ -617,7 +621,22 @@ router.put('/cloud', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, re
       updates.cloud_server_url = normalizeCloudServerUrl(cloud_server_url || DEFAULT_CLOUD_SERVER_URL);
     }
     if (cloud_api_key !== undefined && !isMaskedSecret(cloud_api_key)) {
-      updates.cloud_api_key = String(cloud_api_key || '');
+      const rawApiKey = String(cloud_api_key || '');
+      if (rawApiKey === '') {
+        updates.cloud_api_key = '';
+      } else if (isEncryptedSettingValue(rawApiKey)) {
+        // Already an envelope (idempotent re-save); store unchanged.
+        updates.cloud_api_key = rawApiKey;
+      } else {
+        // A new raw key may only be persisted as a flosec1 envelope. When
+        // secure storage is unavailable the request fails closed: no plaintext
+        // is written and no existing key is touched.
+        try {
+          updates.cloud_api_key = encryptSecret(rawApiKey);
+        } catch {
+          return res.status(503).json({ error: 'Secure storage is unavailable on this device; cloud credentials cannot be saved' });
+        }
+      }
     }
     const enablingCloud = [cloud_sync_enabled, cloud_orders_enabled, cloud_reports_enabled, cloud_command_polling_enabled]
       .some((value) => bool01Flag(value) === '1');

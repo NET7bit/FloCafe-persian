@@ -292,6 +292,11 @@ export function renderBillDocumentToClassicLines(
   // Suffix-unit display (e.g. Toman) declares the unit once — in the amount
   // column header and in each summary row — so item rows stay numeric-only.
   const unit = options.currencyUnit ?? null;
+  // RTL documents mirror the item-table columns; LTR output stays byte-identical.
+  const rtlLayout = detectPrintLanguageDirection(options.language) === 'rtl';
+  const orientedLayouts = (layouts: readonly (RasterTextLayout | undefined)[]): readonly (RasterTextLayout | undefined)[] => rtlLayout
+    ? layouts.map((layout) => (layout ? { ...layout, direction: 'rtl' as const } : undefined))
+    : layouts;
   const amountPrefix = unit ? '' : prefix;
   // Stored amounts are canonical; the suffix unit scales them for display only.
   const displayAmount = (value: number): number => (unit && unit.scale !== 1 ? value * unit.scale : value);
@@ -471,9 +476,32 @@ export function renderBillDocumentToClassicLines(
           unit ? Math.min(labelOf(block.header.amount).length + 1, Math.max(1, cols - qtyWidth - 1)) : 0,
         );
         const nameLen = itemNameWidth(cols, amtLen, qtyWidth);
-        segment.main.push(classicItemHeader(block, nameLen, amtLen, qtyWidth, options.language, options.capabilities));
-        segment.sourceLines.main.push([labelOf(block.header.item), labelOf(block.header.quantity), labelOf(block.header.amount)].join(' '));
-        segment.sourceControlLines.main.push(segment.main.at(-1) ?? '');
+        const headerStart = segment.main.length;
+        const headerLine = classicItemHeader(block, nameLen, amtLen, qtyWidth, options.language, options.capabilities);
+        const headerSourceLine = [labelOf(block.header.item), labelOf(block.header.quantity), labelOf(block.header.amount)].join(' ');
+        segment.main.push(headerLine);
+        segment.sourceLines.main.push(headerSourceLine);
+        segment.sourceControlLines.main.push(headerLine);
+        // The padded header text cannot survive bidi reordering, so RTL receipts
+        // lay it out with the same columns as the rows it labels.
+        if (rtlLayout) {
+          segment.groups.push({
+            groupId: 'item-table-header',
+            start: headerStart,
+            count: 1,
+            sourceLines: [headerSourceLine],
+            sourceControlLines: [headerLine],
+            sourceLayouts: orientedLayouts([{
+              kind: 'financial-item',
+              columns: [
+                { text: labelOf(block.header.item), align: 'left', widthRatio: nameLen / cols },
+                { text: labelOf(block.header.quantity), align: 'left', widthRatio: 4 / cols },
+                { text: labelOf(block.header.amount), align: 'right', widthRatio: amtLen / cols },
+              ],
+            }]),
+            financialSourceLines: [false],
+          });
+        }
         segment.main.push(dash);
         segment.sourceLines.main.push(dash);
         segment.sourceControlLines.main.push(dash);
@@ -751,11 +779,11 @@ export function renderBillDocumentToClassicLines(
     if (options.rasterGroups && segment[part].length > 0) {
       if (part === 'main' && segment.groups.length > 0) {
         for (const group of segment.groups) {
-          options.rasterGroups.push({ groupId: group.groupId, lineIndex: start + group.start, lineCount: group.count, ...(group.sourceLines ? { sourceLines: group.sourceLines } : {}), ...(group.sourceControlLines ? { sourceControlLines: group.sourceControlLines } : {}), ...(group.sourceLayouts ? { sourceLayouts: group.sourceLayouts } : {}), ...(group.financialSourceLines ? { financialSourceLines: group.financialSourceLines } : {}), ...(group.financial ? { financial: true } : {}) });
+          options.rasterGroups.push({ groupId: group.groupId, lineIndex: start + group.start, lineCount: group.count, ...(group.sourceLines ? { sourceLines: group.sourceLines } : {}), ...(group.sourceControlLines ? { sourceControlLines: group.sourceControlLines } : {}), ...(group.sourceLayouts ? { sourceLayouts: orientedLayouts(group.sourceLayouts) } : {}), ...(group.financialSourceLines ? { financialSourceLines: group.financialSourceLines } : {}), ...(group.financial ? { financial: true } : {}) });
         }
       } else {
         const financial = kind === 'totals' || kind === 'tax-breakdown' || kind === 'payments';
-        options.rasterGroups.push({ groupId: kind, lineIndex: start, lineCount: segment[part].length, sourceLines: segment.sourceLines[part], sourceControlLines: segment.sourceControlLines[part], ...(segment.sourceLayouts[part].length > 0 ? { sourceLayouts: segment.sourceLayouts[part] } : {}), ...(financial ? { financial: true } : {}) });
+        options.rasterGroups.push({ groupId: kind, lineIndex: start, lineCount: segment[part].length, sourceLines: segment.sourceLines[part], sourceControlLines: segment.sourceControlLines[part], ...(segment.sourceLayouts[part].length > 0 ? { sourceLayouts: orientedLayouts(segment.sourceLayouts[part]) } : {}), ...(financial ? { financial: true } : {}) });
       }
     }
   };

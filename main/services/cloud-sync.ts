@@ -5,6 +5,7 @@ import * as os from 'os';
 import log from 'electron-log';
 import { WebSocket, type RawData } from 'ws';
 import { readCountryProvenance } from './country-provenance';
+import { decryptSecret, encryptSecret, isEncryptedSettingValue, isSecureStorageAvailable } from './secure-settings';
 import { getDatabase, now, parseItemJson, attachEffectiveAddons, ensureCloudIdentity, isDiagnosticsConsentEnabled, isDatabaseMaintenanceActive, registerDatabaseMaintenanceEndListener, registerDatabaseMaintenanceStartListener, utcDayBounds, utcTodayDate, withDatabaseRequest } from '../db';
 import { getTenantCurrency } from './refund';
 import { getCurrencyMinorUnitFactor } from '../countries';
@@ -80,6 +81,23 @@ type CloudSettings = {
   cloud_deletion_status: string;
   cloud_deletion_outcome: string;
 };
+
+/** Settings key wrapped by the flosec1 envelope (SEC-02 scope: cloud_api_key only). */
+const CLOUD_API_KEY_SETTING = 'cloud_api_key';
+
+/**
+ * How the persisted cloud API key could be used right now.
+ * - `ready`: a decrypted, usable key (envelope read, or a legacy plaintext row
+ *   that was migrated to an envelope in the same read).
+ * - `empty`: no key stored (unregistered).
+ * - `legacy_blocked`: a legacy plaintext row exists but secure storage is not
+ *   available, so the key is withheld (fail-closed) without being deleted.
+ * - `unreadable`: a stored envelope cannot be decrypted (corruption, or a
+ *   database copied from another machine/profile).
+ */
+type CloudApiKeyState = 'ready' | 'empty' | 'legacy_blocked' | 'unreadable';
+
+type CloudApiKeyRead = { key: string; state: CloudApiKeyState };
 
 type CloudCommand = {
   id: string;
@@ -479,11 +497,57 @@ export class CloudSyncService {
     this.relayMode = 'disconnected';
   }
 
+  /**
+   * Single funnel for every read of the cloud API key. No caller may read the
+   * `cloud_api_key` settings cell directly; every consumer (loadSettings,
+   * registration, availability checks, status) goes through here.
+   *
+   * - Envelope rows are decrypted; a decrypt failure yields `unreadable` and an
+   *   empty key, so ciphertext can never reach the network.
+   * - Legacy plaintext rows are migrated in place — but only when secure
+   *   storage is genuinely available — with a compare-and-swap on the exact
+   *   previous value so a concurrent writer is never overwritten.
+   * - When secure storage is unavailable the legacy value is left untouched and
+   *   withheld (`legacy_blocked`): fail-closed, never rewritten, never deleted.
+   */
+  private readCloudApiKey(db: ReturnType<typeof getDatabase>): CloudApiKeyRead {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(CLOUD_API_KEY_SETTING) as { value: string } | undefined;
+    const raw = row?.value ?? '';
+    if (!raw) return { key: '', state: 'empty' };
+    if (isEncryptedSettingValue(raw)) {
+      const decrypted = decryptSecret(raw);
+      if (decrypted === null) return { key: '', state: 'unreadable' };
+      return { key: decrypted, state: 'ready' };
+    }
+    if (!isSecureStorageAvailable()) return { key: '', state: 'legacy_blocked' };
+    let envelope: string;
+    try {
+      envelope = encryptSecret(raw);
+    } catch {
+      return { key: '', state: 'legacy_blocked' };
+    }
+    const migrated = db.prepare('UPDATE settings SET value = ?, updated_at = ? WHERE key = ? AND value = ?')
+      .run(envelope, now(), CLOUD_API_KEY_SETTING, raw);
+    if (migrated.changes === 1) return { key: raw, state: 'ready' };
+    // Another writer replaced the value between our read and update; classify
+    // the winning value without overwriting it.
+    const current = db.prepare('SELECT value FROM settings WHERE key = ?').get(CLOUD_API_KEY_SETTING) as { value: string } | undefined;
+    const currentRaw = current?.value ?? '';
+    if (!currentRaw) return { key: '', state: 'empty' };
+    if (isEncryptedSettingValue(currentRaw)) {
+      const decrypted = decryptSecret(currentRaw);
+      if (decrypted === null) return { key: '', state: 'unreadable' };
+      return { key: decrypted, state: 'ready' };
+    }
+    return { key: '', state: 'legacy_blocked' };
+  }
+
   /** Returns whether cloud account features are available and enabled by the user. */
   isCloudAccountAvailable(): boolean {
-    const settings = this.readSettings(getDatabase());
+    const db = getDatabase();
+    const settings = this.readSettings(db);
     return settings.cloud_registration_status === 'registered'
-      && Boolean(settings.cloud_api_key)
+      && this.readCloudApiKey(db).state === 'ready'
       && settings.cloud_services_disabled_by_user !== 'true'
       && !isCloudDeletionBlocking(settings.cloud_deletion_status);
   }
@@ -517,6 +581,7 @@ export class CloudSyncService {
       cloud_deletion_status: refreshed.cloud_deletion_status || '',
       cloud_deletion_outcome: refreshed.cloud_deletion_outcome || '',
       cloud_deletion_blocked: isCloudDeletionBlocking(refreshed.cloud_deletion_status),
+      cloud_api_key_state: this.readCloudApiKey(db).state,
       cloud_relay_mode: this.relayMode,
       outbox_pending: this.countOutbox('pending'),
       outbox_failed: this.countOutbox('failed'),
@@ -586,7 +651,9 @@ export class CloudSyncService {
         throw new Error(String(data.error || `Registration failed (${res.status})`));
       }
 
-      const apiKey = typeof data.api_key === 'string' ? data.api_key : settings.cloud_api_key;
+      // Fall back to the already-persisted key (decrypted via the single read
+      // funnel, never the raw cell) when the server does not rotate it.
+      const apiKey = typeof data.api_key === 'string' ? data.api_key : this.readCloudApiKey(db).key;
       if (!apiKey) throw new Error('Registration response did not include api_key');
 
       this.upsertSettings({
@@ -1956,7 +2023,7 @@ export class CloudSyncService {
       const server_url = normalizeCloudServerUrl(s.cloud_server_url || DEFAULT_CLOUD_SERVER_URL);
       return {
         server_url,
-        api_key: s.cloud_api_key || '',
+        api_key: this.readCloudApiKey(db).key,
         store_id: s.cloud_store_id || '',
         pos_id: s.cloud_pos_id || '',
         pos_hash: s.cloud_pos_hash || '',
@@ -1992,8 +2059,20 @@ export class CloudSyncService {
       INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `);
+    // Resolve every value first: if the API key cannot be encrypted the whole
+    // batch fails before any row is written (fail-closed, no partial state,
+    // no new plaintext). An empty value clears the key and needs no envelope.
+    const persisted: Record<string, string> = {};
     for (const [key, value] of Object.entries(entries)) {
-      if (value !== undefined && value !== null) stmt.run(key, value, now());
+      if (value === undefined || value === null) continue;
+      let stored = String(value);
+      if (key === CLOUD_API_KEY_SETTING && stored !== '' && !isEncryptedSettingValue(stored)) {
+        stored = encryptSecret(stored);
+      }
+      persisted[key] = stored;
+    }
+    for (const [key, value] of Object.entries(persisted)) {
+      stmt.run(key, value, now());
     }
   }
 

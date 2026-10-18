@@ -141,6 +141,63 @@ async function run() {
     assert.equal(arabicRender.unit.complete, true);
     assert.ok(area(arabicRender.unit) > 0);
 
+    // Column order: RTL layouts mirror so names read from the right, LTR holds left-to-right.
+    const inkCentroid = (unit) => {
+      let sum = 0;
+      let count = 0;
+      for (const band of unit.bands) {
+        for (let i = 0; i < band.pixels.length; i += 1) {
+          if (band.pixels[i] === 0) continue;
+          sum += i % band.widthDots;
+          count += 1;
+        }
+      }
+      return count === 0 ? null : sum / count;
+    };
+    const layoutCase = async ({ requestId, direction, layoutDirection, columns }) => {
+      const rendered = await renderer.render({
+        version: 1,
+        requestId,
+        text: columns.map((column) => column.text).join(' '),
+        widthDots: 240,
+        maxBandHeight: 200,
+        direction,
+        style: 'normal',
+        financial: true,
+        maxLines: 2,
+        layout: {
+          kind: 'financial-item',
+          ...(layoutDirection ? { direction: layoutDirection } : {}),
+          columns,
+        },
+      });
+      assert.equal(rendered.ok, true, `${requestId} should render`);
+      const centroid = inkCentroid(rendered.unit);
+      assert.ok(centroid !== null, `${requestId} should produce ink`);
+      return centroid;
+    };
+    const midline = 120;
+    const nameOnly = [
+      { text: 'Kabab Koobideh', align: 'left', widthRatio: 0.7 },
+      { text: '', align: 'right', widthRatio: 0.3 },
+    ];
+    const amountOnly = [
+      { text: '', align: 'left', widthRatio: 0.7 },
+      { text: '100,000', align: 'right', widthRatio: 0.3 },
+    ];
+    const ltrName = await layoutCase({ requestId: 'electron-column-ltr-name', direction: 'ltr', columns: nameOnly });
+    const rtlName = await layoutCase({ requestId: 'electron-column-rtl-name', direction: 'rtl', columns: nameOnly });
+    assert.ok(ltrName < midline, `LTR name column belongs on the left, got centroid ${ltrName}`);
+    assert.ok(rtlName > midline, `RTL name column belongs on the right, got centroid ${rtlName}`);
+    const ltrAmount = await layoutCase({ requestId: 'electron-column-ltr-amount', direction: 'ltr', columns: amountOnly });
+    const rtlAmount = await layoutCase({ requestId: 'electron-column-rtl-amount', direction: 'rtl', columns: amountOnly });
+    assert.ok(ltrAmount > midline, `LTR amount column belongs on the right, got centroid ${ltrAmount}`);
+    assert.ok(rtlAmount < midline, `RTL amount column belongs on the left, got centroid ${rtlAmount}`);
+    // The document's base direction wins for Latin-only rows, whose text probe says ltr.
+    const latinBaseRtl = await layoutCase({ requestId: 'electron-column-doc-rtl', direction: 'ltr', layoutDirection: 'rtl', columns: nameOnly });
+    assert.ok(latinBaseRtl > midline, `RTL document must mirror Latin rows too, got centroid ${latinBaseRtl}`);
+    console.log('RTL layouts mirror the column order; LTR layouts stay left-to-right.');
+
     surface.webContents.emit('render-process-gone');
     const processFailure = await renderer.render({ ...base, requestId: 'electron-process-failure' });
     assert.deepEqual(processFailure, {

@@ -20,7 +20,8 @@ Module._load = function (request: string, parent: unknown, isMain: boolean) {
 
 const { MIGRATIONS } = require('../main/db');
 const TARGET_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;
-const v102 = MIGRATIONS.find((m: any) => m.version === 102);
+// Locate by name (not version) so the lookup survives migration renumbering.
+const v102 = MIGRATIONS.find((m: any) => m.name === 'add_accounting_core');
 
 let passed = 0;
 let failed = 0;

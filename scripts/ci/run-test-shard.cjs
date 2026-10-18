@@ -2,24 +2,26 @@
 /*
  * CI test sharding for the FloCafe "Core test suite" (`npm test`).
  *
- * The canonical, ordered suite list lives in package.json's "test" script as a
- * chain of `bash tests/run-test.sh npm run test:<name>` invocations. This helper
- * reads that script at run time (so there is no second list to drift), assigns
- * suites to shards round-robin by position, and runs this shard's subset with
- * the same `run-test.sh` wrapper that `npm test` uses.
+ * The canonical, ordered suite list lives in scripts/ci/test-suites.json — the
+ * same manifest that scripts/run-test-suite.cjs (the `npm test` orchestrator)
+ * consumes. Reading that single source here means shard coverage cannot drift
+ * from the manifest and the orchestrator, and an orchestrator rewrite cannot
+ * silently empty the shards.
  *
  * Usage:
  *   SHARD_TOTAL=2 SHARD_INDEX=0 node scripts/ci/run-test-shard.cjs
+ *   FLO_TEST_SHARD_DRY_RUN=1 SHARD_TOTAL=2 SHARD_INDEX=0 node scripts/ci/run-test-shard.cjs
+ *     (prints this shard's suite list without executing anything)
  *
- * The `pretest` hook (test:payment-methods-split) is intentionally NOT run here;
- * CI runs it as its own step before the shards, mirroring `npm test`'s pretest.
+ * Shards are assigned round-robin by manifest position. The `pretest` hook is
+ * intentionally NOT run here; CI runs it as its own step before the shards,
+ * mirroring `npm test`'s pretest.
  */
 
 'use strict';
 
 const { spawnSync } = require('node:child_process');
-const fs = require('node:fs');
-const path = require('node:path');
+const { loadManifest } = require('../run-test-suite.cjs');
 
 function parseIntEnv(name, value, fallback, min) {
   if (value === undefined || value === '') return fallback;
@@ -38,30 +40,41 @@ if (index >= total) {
   process.exit(2);
 }
 
-const packageJsonPath = path.join(__dirname, '..', '..', 'package.json');
-const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-const testScript = pkg.scripts && pkg.scripts.test;
-if (typeof testScript !== 'string' || testScript.length === 0) {
-  console.error('package.json has no "test" script to shard.');
-  process.exit(2);
+const DRY_RUN = process.env.FLO_TEST_SHARD_DRY_RUN === '1';
+
+/**
+ * Loads the canonical suite manifest through the same strict validator the
+ * `npm test` orchestrator uses (JSON array of unique, existing `test:*`
+ * scripts). Any structural problem exits 2 with an explicit message instead of
+ * silently sharding an empty or partial suite list.
+ */
+function loadSuites() {
+  let suites;
+  try {
+    suites = loadManifest();
+  } catch (err) {
+    console.error(`Cannot load the canonical suite manifest: ${err.message}`);
+    process.exit(2);
+  }
+  if (suites.length === 0) {
+    console.error('Test suite manifest is empty; refusing to shard zero suites.');
+    process.exit(2);
+  }
+  return suites;
 }
 
-const suitePattern = /(?:bash\s+tests\/run-test\.sh\s+)?npm\s+run\s+(test:[\w-]+)/g;
-const suites = [];
-let match;
-while ((match = suitePattern.exec(testScript)) !== null) {
-  if (!suites.includes(match[1])) suites.push(match[1]);
-}
-
-if (suites.length === 0) {
-  console.error('Could not extract any test suites from package.json "test" script.');
-  process.exit(2);
-}
+const suites = loadSuites();
 
 const mine = suites.filter((_, i) => i % total === index);
 console.log(
-  `[test-shard] shard ${index}/${total}: ${mine.length}/${suites.length} suites (total across shards).`,
+  `[test-shard] shard ${index}/${total}: ${mine.length}/${suites.length} suites (manifest: scripts/ci/test-suites.json).`,
 );
+
+if (DRY_RUN) {
+  console.log(`[test-shard] dry run; shard ${index} suites:`);
+  for (const suite of mine) console.log(`  ${suite}`);
+  process.exit(0);
+}
 
 let failed = false;
 for (const suite of mine) {

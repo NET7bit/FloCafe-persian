@@ -1,5 +1,5 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import { getDatabase, getKdsStationCategoryIds, getKdsStationRoutingScope, getUserKdsStationIds, hasUserKdsStationAssignments, isDatabaseMaintenanceActive, isKdsStationItemAllowed, now, parseItemJson, attachEffectiveAddons, isKdsEnabled, isVoidedItemKdsVisible, KDS_VOIDED_ITEM_VISIBILITY_MS, projectKdsItem, projectKdsOrder, registerDatabaseMaintenanceStartListener, withTxn } from '../db';
+import { getDatabase, getKdsStationCategoryIds, getKdsStationRoutingScope, getUserKdsStationIds, hasUserKdsStationAssignments, isDatabaseMaintenanceActive, isFkEnforcementDegraded, isKdsStationItemAllowed, now, parseItemJson, attachEffectiveAddons, isKdsEnabled, isVoidedItemKdsVisible, KDS_VOIDED_ITEM_VISIBILITY_MS, projectKdsItem, projectKdsOrder, registerDatabaseMaintenanceStartListener, withTxn } from '../db';
 import * as jwt from 'jsonwebtoken';
 import { getJWTSecret, parseCategoryIds } from '../routes/auth';
 import { getUserAuthStatus, isTokenRevoked, isTokenStale } from '../middleware/security';
@@ -256,6 +256,18 @@ export function setupKdsWebSocket(wss: WebSocketServer): void {
   console.log('[KDS] WebSocket server setup complete');
 }
 
+/**
+ * Rejects an FK-sensitive KDS write while foreign-key enforcement is degraded.
+ * The maintenance lock is not enough: a degraded state outlives maintenance.
+ */
+function rejectWriteWhenFkDegraded(client: KdsClient): void {
+  client.ws.send(JSON.stringify({
+    type: 'error',
+    code: 'ERR_FK_DEGRADED',
+    message: 'Item updates are temporarily unavailable while database checks are in progress',
+  }));
+}
+
 function handleMessage(ws: WebSocket, message: any): void {
   const client = clients.get(ws);
   if (!client) return;
@@ -274,6 +286,8 @@ function handleMessage(ws: WebSocket, message: any): void {
       handleAuth(ws, client, message);
       break;
 
+    // Write handlers must reject while FK enforcement is degraded; the gate
+    // lives in the handler so session/validation errors keep their responses.
     case 'status_update':
       handleStatusUpdate(client, message);
       break;
@@ -389,6 +403,14 @@ function handleStatusUpdate(client: KdsClient, message: any): void {
   }
   if (expectedStatus !== undefined && !validStatuses.includes(expectedStatus)) {
     client.ws.send(JSON.stringify({ type: 'error', message: `Invalid expected status. Use: ${validStatuses.join(', ')}` }));
+    return;
+  }
+
+  // Same policy as the HTTP write gate: order_items is FK-sensitive, so no
+  // mutation may run while FK enforcement is unverified. The check is
+  // synchronous and adjacent to the write, so no other work can interleave.
+  if (isFkEnforcementDegraded()) {
+    rejectWriteWhenFkDegraded(client);
     return;
   }
 

@@ -5,6 +5,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const MANIFEST_PATH = path.join(__dirname, 'test-suites.json');
+
 const TEST_EXCLUSIONS = {
   'test:e2e:server': 'Long-running server process used by the dedicated Playwright jobs.',
   'test:e2e:browser': 'Runs in the dedicated browser Playwright CI job.',
@@ -57,12 +59,49 @@ function extractExecutedTestScripts(command) {
     .map((match) => match[1]);
 }
 
+// Root `npm test` now delegates to the orchestrator, so the canonical suite
+// inventory (scripts/ci/test-suites.json) replaces direct parsing of the test
+// command. Seed reachability from the manifest plus pretest, then follow any
+// `npm run test:*` calls nested inside individual suite commands.
+function loadSuiteManifest() {
+  const raw = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
+  if (!Array.isArray(raw)) {
+    throw new Error(`Test manifest ${MANIFEST_PATH} must be an array of script names.`);
+  }
+  const seen = new Set();
+  for (const name of raw) {
+    if (typeof name !== 'string' || !name.startsWith('test:')) {
+      throw new Error(`Test manifest contains a non test:* entry: ${JSON.stringify(name)}`);
+    }
+    if (seen.has(name)) {
+      throw new Error(`Test manifest lists ${name} more than once.`);
+    }
+    seen.add(name);
+  }
+  return raw;
+}
+
 function main() {
   const packagePath = path.join(__dirname, '..', '..', 'package.json');
   const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
   const scripts = pkg.scripts || {};
-  const reachable = new Set(['pretest', 'test']);
-  const pending = ['pretest', 'test'];
+
+  let manifest = [];
+  try {
+    manifest = loadSuiteManifest();
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+
+  // The manifest is authoritative, so every entry must point at a real script
+  // and must not carry a dedicated execution slot in the default run.
+  const manifestInvalid = manifest.filter(
+    (name) => !scripts[name] || TEST_EXCLUSIONS[name],
+  );
+
+  const reachable = new Set(['pretest', 'test', ...manifest]);
+  const pending = [...reachable];
 
   while (pending.length > 0) {
     const scriptName = pending.shift();
@@ -82,16 +121,17 @@ function main() {
     .filter(([, reason]) => typeof reason !== 'string' || reason.trim().length < 12)
     .map(([name]) => name);
 
-  if (missing.length || stale.length || invalidReasons.length) {
+  if (missing.length || stale.length || invalidReasons.length || manifestInvalid.length) {
     if (missing.length) console.error(`Uncovered test scripts: ${missing.join(', ')}`);
     if (stale.length) console.error(`Stale test exclusions: ${stale.join(', ')}`);
     if (invalidReasons.length) console.error(`Test exclusions without a useful reason: ${invalidReasons.join(', ')}`);
+    if (manifestInvalid.length) console.error(`Suite manifest references missing or excluded scripts: ${manifestInvalid.join(', ')}`);
     process.exit(1);
   }
 
-  console.log(`Test script coverage OK: ${testScripts.length - Object.keys(TEST_EXCLUSIONS).length} reachable, ${Object.keys(TEST_EXCLUSIONS).length} explicitly excluded.`);
+  console.log(`Test script coverage OK: ${reachable.size - 2} reachable (${manifest.length} in the suite manifest), ${Object.keys(TEST_EXCLUSIONS).length} explicitly excluded.`);
 }
 
 if (require.main === module) main();
 
-module.exports = { extractExecutedTestScripts };
+module.exports = { extractExecutedTestScripts, TEST_EXCLUSIONS, loadSuiteManifest };

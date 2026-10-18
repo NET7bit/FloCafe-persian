@@ -264,6 +264,46 @@ test('a non-Iran tenant keeps its existing currency rendering (regression)', () 
   assert.match(lines.find((line) => line.includes('TOTAL'))!, /\$4\.50$/);
 });
 
+/** LTR control: same machine and fixture, English labels → base direction stays ltr. */
+function classicEnglish() {
+  const { order, bill, business } = iranFixture('rial');
+  return renderClassicReceiptViaDocument(order, bill, business, {
+    columns: 48,
+    language: 'en',
+    isReprint: false,
+    useUnicode: true,
+    arabicShaping: false,
+    cutMode: 'full',
+    capabilities: CLASSIC_CAPS,
+  });
+}
+
+test('RTL receipts mirror the item table and lay the header out in columns', () => {
+  const { rasterGroups } = classicIran('toman');
+  const headerGroup = rasterGroups.find((group) => group.groupId === 'item-table-header');
+  assert.ok(headerGroup, 'expected an RTL raster group for the item table header');
+  assert.equal(headerGroup!.sourceLayouts?.[0]?.direction, 'rtl');
+  assert.deepEqual(
+    headerGroup!.sourceLayouts?.[0]?.columns.map((column) => column.text),
+    ['اقلام', 'تعداد', 'مبلغ (تومان)'],
+  );
+
+  const rowLayout = rasterGroups.find((group) => group.groupId === 'item-table-row-0')?.sourceLayouts?.[0];
+  assert.equal(rowLayout?.direction, 'rtl');
+
+  const totalsLayouts = rasterGroups.find((group) => group.groupId === 'totals')?.sourceLayouts ?? [];
+  assert.ok(totalsLayouts.length > 0, 'expected totals layouts');
+  assert.ok(totalsLayouts.every((layout) => layout?.direction === 'rtl'), 'totals must mirror with the rows');
+});
+
+test('LTR receipts keep the left-to-right column order', () => {
+  const { rasterGroups } = classicEnglish();
+  assert.equal(rasterGroups.find((group) => group.groupId === 'item-table-header'), undefined, 'LTR adds no mirrored header group');
+  const layouts = rasterGroups.flatMap((group) => group.sourceLayouts ?? []);
+  assert.ok(layouts.length > 0, 'expected raster layouts in the LTR receipt');
+  for (const layout of layouts) assert.equal(layout?.direction, undefined);
+});
+
 test('rendering a Persian Toman invoice never mutates the source amounts', () => {
   const { order, bill, business } = iranFixture('toman');
   const before = JSON.stringify({ order, bill });

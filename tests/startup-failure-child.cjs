@@ -9,6 +9,22 @@ const exitCodes = [];
 const appListeners = new Map();
 const startupRace = process.env.FLO_STARTUP_RACE === '1';
 const startupFailureRace = process.env.FLO_STARTUP_FAILURE_RACE === '1';
+// Blocked-migration mode: initDatabase throws the real structured diagnostic the
+// migration engine raises, so the startup dialog is asserted on real content.
+const convergenceBlock = process.env.FLO_STARTUP_CONVERGENCE_BLOCK === '1';
+const dialogs = [];
+const telemetryEvents = [];
+
+function blockedMigrationError() {
+  const { MigrationConvergenceError } = require('../main/migration-diagnostics');
+  if (typeof MigrationConvergenceError !== 'function') {
+    throw new Error('migration-diagnostics did not export MigrationConvergenceError');
+  }
+  return new MigrationConvergenceError([
+    { objectType: 'column', object: 'role_permission_overrides.effect', problem: 'column missing' },
+    { objectType: 'index', object: 'local_diagnostics.idx_local_diagnostics_created', problem: 'index missing' },
+  ], 1001, 'catch_up_upstream_v93_to_v98');
+}
 const realProcessExit = process.exit.bind(process);
 let releaseServerStart;
 let rejectServerStart;
@@ -59,7 +75,7 @@ Module._load = function (request, parent, isMain) {
       app,
       BrowserWindow: class {},
       ipcMain: { handle() {} },
-      dialog: { showErrorBox: () => { events.push('dialog.showErrorBox'); } },
+      dialog: { showErrorBox: (title, body) => { events.push('dialog.showErrorBox'); dialogs.push({ title, body }); } },
       Menu: { buildFromTemplate: () => ({}), setApplicationMenu() {} },
       Tray: class {},
       nativeImage: { createFromPath: () => ({ resize: () => ({}) }) },
@@ -73,6 +89,7 @@ Module._load = function (request, parent, isMain) {
     return {
       initDatabase: () => {
         events.push('database.init');
+        if (convergenceBlock) throw blockedMigrationError();
         if (!startupRace && !startupFailureRace) throw new Error('simulated startup failure');
       },
       beginDatabaseShutdown: () => { events.push('database.admission'); },
@@ -117,7 +134,7 @@ Module._load = function (request, parent, isMain) {
       start() { events.push('telemetry.start'); },
       stop: () => { events.push('telemetry.stop'); },
     },
-    sendEvent: async () => { events.push('telemetry.startup-failed'); return true; },
+    sendEvent: async (name, payload) => { events.push('telemetry.startup-failed'); telemetryEvents.push({ name, payload }); return true; },
   };
   if (request === './services/google-drive') return {
     googleDrive: {
@@ -176,7 +193,7 @@ setTimeout(() => {
     : startupRace
     ? exitCodes.length === 1 && exitCodes[0] === 0 && !events.includes('telemetry.start') && !events.includes('drive.start')
     : exitCodes.length === 1 && exitCodes[0] === 1);
-  process.stdout.write(JSON.stringify({ passed, events, exitCodes }) + '\n');
+  process.stdout.write(JSON.stringify({ passed, events, exitCodes, dialogs, telemetryEvents }) + '\n');
   fs.rmSync(testDir, { recursive: true, force: true });
   Module._load = originalLoad;
   realProcessExit(passed ? 0 : 1);

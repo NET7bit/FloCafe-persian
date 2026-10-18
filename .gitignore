@@ -48,3 +48,6 @@ test-results/
 
 # Local agent/tool session metadata (e.g. Codebuff project id) — never commit
 .freebuff/
+
+# AutoClaw KDream data
+.autoclaw/

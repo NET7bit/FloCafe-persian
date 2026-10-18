@@ -8,6 +8,7 @@ import { getLocalIP } from './server';
 import { clearJWTSecretCache } from './routes/auth';
 import { getKdsPort } from './kds-server';
 import { authorizeMasterPin, isMasterPinAvailable, isMasterPinSet } from './services/master-pin';
+import { maskedSecretSuffix } from './services/secure-settings';
 import { runHealthCheck, applySafeFixes } from './services/schema-health';
 import { getStatus as getWhatsAppStatus, sanitizeLogText } from './services/whatsapp';
 import { createKdsWindow, applyWindowControlAction } from './window-options';
@@ -59,6 +60,9 @@ const SENSITIVE_SETTING_KEYS = new Set([
 function maskSetting(key: string, value: string): string {
   if (key === 'cloud_last_error') return value ? 'Cloud service request failed' : '';
   if (!SENSITIVE_SETTING_KEYS.has(key)) return value;
+  // The cloud API key is stored as a flosec1 envelope; decrypt before masking
+  // so the visible suffix belongs to the real secret, never to ciphertext.
+  if (key === 'cloud_api_key') return maskedSecretSuffix(value);
   return value ? `****${value.slice(-4)}` : '';
 }
 
@@ -244,11 +248,26 @@ export function registerIpcHandlers(
           (signal) => restoreBackup(backupPath, false, signal),
           shutdownSignal,
         );
-        const cleanup = restoreResult.success ? googleDrive.completeDatabaseRestore() : null;
-        clearUserAuthCache();
-        clearInMemoryRevokedTokens();
-        clearJWTSecretCache();
-        const cleanupPending = restoreResult.cleanupPending === true || cleanup?.cleanupPending === true;
+        // The restore is already committed here; post-commit side effects must
+        // not turn it into a reported failure — the renderer would invite the
+        // user to retry a destructive restore (P-3.4).
+        let cleanupPending = restoreResult.cleanupPending === true;
+        if (restoreResult.success) {
+          try {
+            const cleanup = googleDrive.completeDatabaseRestore();
+            cleanupPending = cleanupPending || cleanup?.cleanupPending === true;
+          } catch (cleanupError) {
+            cleanupPending = true;
+            console.error('[IPC] restore-backup: post-commit restore cleanup failed (restore is committed):', cleanupError);
+          }
+        }
+        try {
+          clearUserAuthCache();
+          clearInMemoryRevokedTokens();
+          clearJWTSecretCache();
+        } catch (cacheError) {
+          console.error('[IPC] restore-backup: post-commit cache cleanup failed:', cacheError);
+        }
         return {
           success: restoreResult.success,
           mode: restoreResult.mode,
@@ -267,11 +286,25 @@ export function registerIpcHandlers(
         (signal) => restoreBackup(backupPath, true, signal),
         shutdownSignal,
       );
-      const cleanup = restoreResult.success ? googleDrive.completeDatabaseRestore() : null;
-      clearUserAuthCache();
-      clearInMemoryRevokedTokens();
-      clearJWTSecretCache();
-      const cleanupPending = restoreResult.cleanupPending === true || cleanup?.cleanupPending === true;
+      // The restore is already committed here; post-commit side effects must not
+      // turn it into a reported failure (P-3.4).
+      let cleanupPending = restoreResult.cleanupPending === true;
+      if (restoreResult.success) {
+        try {
+          const cleanup = googleDrive.completeDatabaseRestore();
+          cleanupPending = cleanupPending || cleanup?.cleanupPending === true;
+        } catch (cleanupError) {
+          cleanupPending = true;
+          console.error('[IPC] restore-backup: post-commit restore cleanup failed (restore is committed):', cleanupError);
+        }
+      }
+      try {
+        clearUserAuthCache();
+        clearInMemoryRevokedTokens();
+        clearJWTSecretCache();
+      } catch (cacheError) {
+        console.error('[IPC] restore-backup: post-commit cache cleanup failed:', cacheError);
+      }
       return {
         success: restoreResult.success,
         mode: restoreResult.mode,
@@ -283,7 +316,13 @@ export function registerIpcHandlers(
         cleanupPending,
       };
       } finally {
-        googleDrive.releaseDatabaseRestore();
+        try {
+          googleDrive.releaseDatabaseRestore();
+        } catch (releaseError) {
+          // A release failure must not discard the successful return value above:
+          // a throwing finally would replace it with `{ success: false }`.
+          console.error('[IPC] restore-backup: post-response Drive restore release failed (restore is committed):', releaseError);
+        }
       }
     } catch (error: unknown) {
       console.error('[IPC] restore-backup: Error:', error);
@@ -325,17 +364,37 @@ export function registerIpcHandlers(
 
     try {
       await googleDrive.prepareForDatabaseRestore();
-      const { backupPath } = await resetDatabaseWithBackup(shutdownSignal);
-      const cleanup = googleDrive.completeDatabaseRestore();
-      clearUserAuthCache();
-      clearInMemoryRevokedTokens();
-      clearJWTSecretCache();
-      return { success: true, backupPath, cleanupPending: cleanup.cleanupPending };
+      const result = await resetDatabaseWithBackup(shutdownSignal);
+      // The initialize (database wipe + re-seed) is already committed here; a
+      // post-commit side-effect failure must not be reported as a failed
+      // initialize — repeating it would destroy a fresh, valid database.
+      let cleanupPending = result.cleanupPending === true;
+      try {
+        const cleanup = googleDrive.completeDatabaseRestore();
+        cleanupPending = cleanupPending || cleanup?.cleanupPending === true;
+      } catch (cleanupError) {
+        cleanupPending = true;
+        console.error('[IPC] db-initialize: post-commit restore cleanup failed (initialize is committed):', cleanupError);
+      }
+      try {
+        clearUserAuthCache();
+        clearInMemoryRevokedTokens();
+        clearJWTSecretCache();
+      } catch (cacheError) {
+        console.error('[IPC] db-initialize: post-commit cache cleanup failed:', cacheError);
+      }
+      return { success: true, backupPath: result.backupPath, cleanupPending };
     } catch (error: unknown) {
       console.error('[IPC] db-initialize: Error:', error);
       return { success: false, error: getErrorMessage(error) };
     } finally {
-      googleDrive.releaseDatabaseRestore();
+      try {
+        googleDrive.releaseDatabaseRestore();
+      } catch (releaseError) {
+        // A release failure must not discard the successful return value above:
+        // a throwing finally would replace it with `{ success: false }`.
+        console.error('[IPC] db-initialize: post-response Drive restore release failed (initialize is committed):', releaseError);
+      }
     }
   });
 

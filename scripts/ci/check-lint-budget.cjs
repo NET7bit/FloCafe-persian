@@ -10,7 +10,25 @@ const fs = require('node:fs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const BUDGET_PATH = path.join(__dirname, 'lint-budget.json');
+const BASELINE_PATH = path.join(__dirname, 'lint-warning-baseline.json');
 const budget = JSON.parse(fs.readFileSync(BUDGET_PATH, 'utf8'));
+
+// Ratchet anchor: ceilings in lint-budget.json may never sit above the
+// recorded baseline in lint-warning-baseline.json. Raising the ceiling above
+// the valid baseline (or re-recording the baseline) is a reviewed, explicit
+// act — never a side effect of greenifying CI. A missing baseline file is a
+// hard error, so the anchor cannot be quietly deleted.
+let baseline;
+try {
+  baseline = JSON.parse(fs.readFileSync(BASELINE_PATH, 'utf8'));
+} catch (err) {
+  console.error(`Cannot read lint warning baseline ${BASELINE_PATH}: ${err.message}`);
+  process.exit(1);
+}
+if (!baseline || typeof baseline !== 'object' || !baseline.counts) {
+  console.error(`Lint warning baseline ${BASELINE_PATH} is malformed (missing counts).`);
+  process.exit(1);
+}
 
 function countWarnings(cwd, args) {
   let stdout;
@@ -19,6 +37,8 @@ function countWarnings(cwd, args) {
       cwd,
       encoding: 'utf8',
       maxBuffer: 1024 * 1024 * 64,
+      // `npx` is a .cmd shim on Windows and cannot be spawned directly.
+      shell: process.platform === 'win32',
     });
   } catch (err) {
     // eslint exits non-zero when it reports any error/warning; stdout still has the JSON report.
@@ -35,11 +55,21 @@ const frontendCount = countWarnings(path.join(ROOT, 'frontend'), ['.']);
 let failed = false;
 for (const [name, count] of [['backend', backendCount], ['frontend', frontendCount]]) {
   const limit = budget[name];
+  const baselineCount = baseline.counts[name];
+  if (typeof limit !== 'number' || typeof baselineCount !== 'number') {
+    console.error(`Lint warning budget/baseline missing a numeric value for ${name}.`);
+    failed = true;
+    continue;
+  }
+  if (limit > baselineCount) {
+    console.error(`Lint warning ceiling for ${name} (${limit}) exceeds the recorded baseline (${baselineCount}); ratchet violated.`);
+    failed = true;
+  }
   if (count > limit) {
     console.error(`Lint warning budget exceeded for ${name}: ${count} warnings (budget: ${limit}).`);
     failed = true;
   } else {
-    console.log(`Lint warning budget OK for ${name}: ${count} warnings (budget: ${limit}).`);
+    console.log(`Lint warning budget OK for ${name}: ${count} warnings (budget: ${limit}, baseline: ${baselineCount}).`);
   }
 }
 

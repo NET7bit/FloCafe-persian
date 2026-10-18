@@ -192,6 +192,7 @@ export function startServer(): Promise<void> {
       res.status(db.ok ? 200 : 503).json({
         status: db.ok ? 'ok' : 'error',
         db: db.ok ? 'ok' : db.error,
+        foreignKeys: db.foreignKeys ?? 'unknown',
         service: 'Flo Local API',
         version: process.env.npm_package_version || '2.4.7',
         timestamp: new Date().toISOString(),

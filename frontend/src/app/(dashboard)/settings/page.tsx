@@ -494,12 +494,12 @@ export default function SettingsPage() {
     }
   };
 
-  const handlePinGateSubmit = async (pin: string): Promise<{ success: boolean; error?: string }> => {
+  const handlePinGateSubmit = async (pin: string, password?: string): Promise<{ success: boolean; error?: string }> => {
     if (!pinGate) return { success: false, error: t('nothingPending') };
 
     if (pinGate.mode === 'set') {
       try {
-        await api.post('/db-tools/master-pin/reset', { pin, confirm_pin: pin });
+        await api.post('/db-tools/master-pin/reset', { pin, confirm_pin: pin, password });
         await fetchMasterPinStatus();
         toast.success(t('masterPinSaved'));
         setPinGate(null);
