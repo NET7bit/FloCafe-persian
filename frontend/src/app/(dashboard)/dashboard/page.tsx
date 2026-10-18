@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/auth';
 import api from '@/lib/api';
@@ -24,7 +24,9 @@ import {
 import { PAYMENT_METHODS } from '@/lib/payment-methods';
 import { ORDER_STATUS_LABEL_KEYS } from '@/lib/i18n-enums';
 import { splitHoursMinutes } from '@/lib/table-timing';
-import { ROLE_ACCESS, hasRole } from '@shared/role-permissions';
+import { tenantCan } from '@/lib/permissions';
+import { businessDateForInstant } from '@shared/business-date';
+import { downloadBlob } from '@/lib/download';
 
 
 interface PaymentMethodBreakdown {
@@ -155,13 +157,6 @@ interface DashboardMetric {
   comparison?: ReactNode;
 }
 
-/** Today's date as YYYY-MM-DD in a given IANA timezone (not UTC — avoids an
- *  off-by-one-day default near midnight relative to the tenant's locale). */
-function getLocalDateString(date: Date, timeZone: string): string {
-  // en-CA formats as YYYY-MM-DD by convention — a convenient built-in shortcut.
-  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
-}
-
 function getMonthRange(month: string): { startDate: string; endDate: string } {
   const [year, monthNumber] = month.split('-').map(Number);
   const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
@@ -207,6 +202,7 @@ const BUILT_IN_PAYMENT_KEYS = {
 } as const satisfies Record<'cash' | 'card' | 'customer_account', PosKey>;
 
 export default function DashboardPage() {
+  const searchParams = useSearchParams();
   const { currentTenant } = useAuthStore();
   const t = useTranslations('dashboard');
   const tCommon = useTranslations('common');
@@ -223,12 +219,24 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
 
-  const isOwner = hasRole(currentTenant?.role, ROLE_ACCESS.owner);
+  const isOwner = tenantCan(currentTenant, 'dashboard.view');
+  const canViewFinancials = tenantCan(currentTenant, 'reports.financial.view');
   const fmt = useFormatCurrency();
+  // Financial figures require `reports.financial.view`, independently of `dashboard.view`;
+  // mask them instead of showing a misleading zero when that permission isn't granted.
+  const fmtFinancial = (value: number): string => (canViewFinancials ? fmt(value) : '—');
+  const numFinancial = (value: number): string | number => (canViewFinancials ? value : '—');
   const { formatDateTime } = useFormatDate();
   const locale = useLocale();
   const timeZone = currentTenant?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const todayLocal = getLocalDateString(new Date(), timeZone);
+  // The store's business day starts at its configured time, not at midnight, so
+  // the day picker and its upper bound follow the same rule the cash-close modal
+  // and the drawer movements use instead of the plain tenant-local date.
+  const todayLocal = businessDateForInstant({
+    instant: new Date(),
+    timezone: timeZone,
+    startTime: currentTenant?.business_day_start_time || '00:00',
+  });
   const [selectedDate, setSelectedDate] = useState(todayLocal);
   const [selectedMonth, setSelectedMonth] = useState(todayLocal.slice(0, 7));
   const [periodMode, setPeriodMode] = useState<'day' | 'month'>('day');
@@ -275,7 +283,7 @@ export default function DashboardPage() {
       ? Promise.resolve(null)
       : api.get('/reports/summary', { params: { date: selectedDate }, signal: controller.signal });
     const previousWeekDate = shiftDate(selectedDate, -7);
-    const comparisonRequest = periodMode === 'day'
+    const comparisonRequest = periodMode === 'day' && canViewFinancials
       ? api.get('/reports/financial-summary', {
           params: { start_date: previousWeekDate, end_date: previousWeekDate },
           signal: controller.signal,
@@ -289,10 +297,17 @@ export default function DashboardPage() {
             return null;
           })
       : Promise.resolve(null);
+    // `dashboard.view` and `reports.financial.view` are independently configurable, so an
+    // owner may grant one without the other. Skip the financial-summary call entirely in
+    // that case rather than letting its 403 reject the whole Promise.all and blank the tiles
+    // (running orders, tables, top products, ...) that only need `dashboard.view`.
+    const financialSummaryRequest = canViewFinancials
+      ? api.get('/reports/financial-summary', { params: { start_date: range.startDate, end_date: range.endDate }, signal: controller.signal })
+      : Promise.resolve(null);
     Promise.all([
       dailyStatsRequest,
       scopedSummary,
-      api.get('/reports/financial-summary', { params: { start_date: range.startDate, end_date: range.endDate }, signal: controller.signal }),
+      financialSummaryRequest,
       api.get('/reports/topProducts', { params: { start_date: range.startDate, end_date: range.endDate, limit: 5 }, signal: controller.signal }),
       api.get('/reports/recentOrders', {
         params: periodMode === 'month'
@@ -306,7 +321,7 @@ export default function DashboardPage() {
       .then(([statsRes, summaryRes, financialRes, topRes, recentRes, insightsRes, comparisonRes]) => {
         setStats(statsRes?.data ?? null);
         setDaySummary(summaryRes?.data?.summary ?? null);
-        setFinancialSummary(financialRes.data.financialSummary);
+        setFinancialSummary(financialRes?.data.financialSummary ?? null);
         setTopProducts(topRes.data.topProducts || []);
         setRecentOrders(recentRes.data.recentOrders || []);
         setInsights(insightsRes.data);
@@ -321,20 +336,22 @@ export default function DashboardPage() {
       });
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOwner, periodMode, selectedDate, selectedMonth]);
+  }, [isOwner, canViewFinancials, periodMode, selectedDate, selectedMonth]);
 
   // Day-close wizard lives in useCashClose + CashCloseModal; the page
   // only opens it and mounts it.
   const cashClose = useCashClose();
-
-  const downloadBlob = (data: Blob, filename: string) => {
-    const url = URL.createObjectURL(data);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const { openCloseModal } = cashClose;
+  const cashCloseAction = searchParams.get('action');
+  const requestedCashCloseView = searchParams.get('view');
+  const cashCloseView = requestedCashCloseView === 'x-report' || requestedCashCloseView === 'z-report'
+    ? requestedCashCloseView
+    : null;
+  useEffect(() => {
+    if (cashCloseAction !== 'cash-close') return;
+    openCloseModal(cashCloseView);
+    router.replace('/dashboard', { scroll: false });
+  }, [cashCloseAction, cashCloseView, openCloseModal, router]);
 
   const exportDailySales = async (format: 'xlsx' | 'csv') => {
     if (periodMode !== 'day' || isExporting) return;
@@ -401,7 +418,7 @@ export default function DashboardPage() {
     ? [
         {
           label: t('netCollections'),
-          value: fmt(financialSummary?.netCollected ?? 0),
+          value: fmtFinancial(financialSummary?.netCollected ?? 0),
           icon: Banknote,
           color: 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-800/50 dark:bg-emerald-950/30',
           iconBg: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300',
@@ -409,7 +426,7 @@ export default function DashboardPage() {
         },
         {
           label: t('grossCollections'),
-          value: fmt(financialSummary?.grossCollected ?? 0),
+          value: fmtFinancial(financialSummary?.grossCollected ?? 0),
           icon: TrendingUp,
           color: 'border-blue-200 bg-blue-50/80 dark:border-blue-800/50 dark:bg-blue-950/30',
           iconBg: 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300',
@@ -417,7 +434,7 @@ export default function DashboardPage() {
         },
         {
           label: t('billsCollected'),
-          value: financialSummary?.billCount ?? 0,
+          value: numFinancial(financialSummary?.billCount ?? 0),
           icon: ReceiptText,
           color: 'border-violet-200 bg-violet-50/80 dark:border-violet-800/50 dark:bg-violet-950/30',
           iconBg: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300',
@@ -425,7 +442,7 @@ export default function DashboardPage() {
         },
         {
           label: t('refunds'),
-          value: fmt(financialSummary?.refunded ?? 0),
+          value: fmtFinancial(financialSummary?.refunded ?? 0),
           icon: RotateCcw,
           color: 'border-red-200 bg-red-50/80 dark:border-red-800/50 dark:bg-red-950/30',
           iconBg: 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300',
@@ -436,7 +453,7 @@ export default function DashboardPage() {
       ? [
           {
             label: t('todaySales'),
-            value: fmt(financialSummary?.netCollected ?? 0),
+            value: fmtFinancial(financialSummary?.netCollected ?? 0),
             comparison: salesComparison,
             icon: Banknote,
             color: 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-800/50 dark:bg-emerald-950/30',
@@ -474,7 +491,7 @@ export default function DashboardPage() {
       : [
           {
             label: t('sales'),
-            value: fmt(financialSummary?.netCollected ?? 0),
+            value: fmtFinancial(financialSummary?.netCollected ?? 0),
             comparison: salesComparison,
             icon: Banknote,
             color: 'border-emerald-200 bg-emerald-50/80 dark:border-emerald-800/50 dark:bg-emerald-950/30',
@@ -499,7 +516,7 @@ export default function DashboardPage() {
           },
           {
             label: t('billsCollected'),
-            value: financialSummary?.billCount ?? 0,
+            value: numFinancial(financialSummary?.billCount ?? 0),
             icon: ReceiptText,
             color: 'border-violet-200 bg-violet-50/80 dark:border-violet-800/50 dark:bg-violet-950/30',
             iconBg: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300',
@@ -522,7 +539,7 @@ export default function DashboardPage() {
         },
         {
           label: t('aov'),
-          value: fmt(financialSummary?.averageOrderValue ?? 0),
+          value: fmtFinancial(financialSummary?.averageOrderValue ?? 0),
           comparison: aovComparison,
           icon: TrendingUp,
           iconBg: 'bg-teal-100 text-teal-700 dark:bg-teal-900/50 dark:text-teal-300',
@@ -609,7 +626,7 @@ export default function DashboardPage() {
 
           <Button
             type="button"
-            onClick={cashClose.openCloseModal}
+            onClick={() => cashClose.openCloseModal()}
             className="h-10 rounded-xl bg-brand px-4 text-white shadow-sm hover:bg-brand-hover"
           >
             <Lock size={14} />
@@ -865,7 +882,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {periodMode === 'month' && (
+          {periodMode === 'month' && canViewFinancials && (
             <section className="mt-5 overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
               <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
                 <div>

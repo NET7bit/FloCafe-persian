@@ -8,7 +8,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import jwt from 'jsonwebtoken';
 import { registerRoutes } from './routes';
-import { getJWTSecret } from './routes/auth';
+import { getJWTSecret } from './security/jwt-secret';
 import { databaseMaintenanceMiddleware, getDbHealth, isDatabaseMaintenanceActive, isKdsEnabled } from './db';
 import { setupKdsWebSocket } from './services/kds';
 import expressRateLimit from 'express-rate-limit';
@@ -28,21 +28,28 @@ let stopPromise: Promise<void> | null = null;
 let startReject: ((error: Error) => void) | null = null;
 let stopping = false;
 
-/** JWT verification middleware protecting API routes from unauthenticated LAN access. */
-function requireAuth(req: Request, res: Response, next: NextFunction): void {
+/** JWT verification middleware protecting API routes from unauthenticated LAN access. Exported so tests can assert its path exemptions. */
+export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+  // Express matches routes case-insensitively by default, so /API/pos-info
+  // reaches the same handler as /api/pos-info. Every path decision below must
+  // use one canonical lowercase form, otherwise a case-variant path skips this
+  // middleware while still routing to the protected handler behind it.
+  const reqPath = req.path.toLowerCase();
   // Only protect API routes — static files and SPA fallback must pass through
-  if (!req.path.startsWith('/api')) { next(); return; }
+  if (!reqPath.startsWith('/api')) { next(); return; }
   // Health check — unauthenticated
-  if (req.path === '/api/health') { next(); return; }
-  // Auth routes handle their own token verification
-  if (req.path.startsWith('/api/auth')) { next(); return; }
+  if (reqPath === '/api/health') { next(); return; }
+  // Auth routes handle their own token verification. Matched with a trailing
+  // slash so this doesn't also swallow /api/authorization, which relies on
+  // this middleware to populate req.user before its own permission gate runs.
+  if (reqPath === '/api/auth' || reqPath.startsWith('/api/auth/')) { next(); return; }
   // Allow unauthenticated GET requests for product images (so <img> tags work)
-  if (req.path.startsWith('/api/products/') && req.path.endsWith('/image') && req.method === 'GET') { next(); return; }
+  if (reqPath.startsWith('/api/products/') && reqPath.endsWith('/image') && req.method === 'GET') { next(); return; }
   // Login-screen support-ticket paths, rate-limited in support-ticket.ts.
   // Matched exactly (not by prefix) so a lookalike path can't skip auth.
-  if (req.method === 'POST' && req.path === '/api/support-ticket/pre-login') { next(); return; }
-  if (req.method === 'GET' && req.path === '/api/support-ticket/pre-login/profile') { next(); return; }
-  if (req.method === 'GET' && /^\/api\/support-ticket\/pre-login\/[0-9a-f-]{36}\/status$/i.test(req.path)) { next(); return; }
+  if (req.method === 'POST' && reqPath === '/api/support-ticket/pre-login') { next(); return; }
+  if (req.method === 'GET' && reqPath === '/api/support-ticket/pre-login/profile') { next(); return; }
+  if (req.method === 'GET' && /^\/api\/support-ticket\/pre-login\/[0-9a-f-]{36}\/status$/i.test(reqPath)) { next(); return; }
 
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
@@ -58,9 +65,9 @@ function requireAuth(req: Request, res: Response, next: NextFunction): void {
     const decoded = jwt.verify(token, getJWTSecret()) as any;
 
     // Reject tokens for users deactivated (or deleted) since token was issued.
-    const freshKdsAuth = req.path.startsWith('/api/kds')
-      || req.path.startsWith('/api/kitchen')
-      || req.path.startsWith('/api/order-items');
+    const freshKdsAuth = reqPath.startsWith('/api/kds')
+      || reqPath.startsWith('/api/kitchen')
+      || reqPath.startsWith('/api/order-items');
     const status = getUserAuthStatus(decoded.userId, { fresh: freshKdsAuth });
     if (!status || !status.isActive) {
       res.status(401).json({ error: 'Invalid or expired token' });
@@ -253,20 +260,19 @@ export function startServer(): Promise<void> {
         : 500;
       if (status >= 500) {
         console.error('[Server] Error:', err);
-        // Fire-and-forget: reportDiagnostic never throws and consent-gates its own writes.
+        // Fire-and-forget: reportDiagnostic never throws and derives a signature locally.
         try {
           cloudSync.reportDiagnostic({
             event_id: crypto.randomUUID(),
             event_code: 'server.internal_error',
             severity: 'error',
-            message: String(err.message || 'Unhandled server error').slice(0, 300),
             metadata: {
               route: _req.path.slice(0, 200),
               method: _req.method,
               status,
             },
             occurred_at: new Date().toISOString(),
-          });
+          }, err);
         } catch { /* diagnostics must never mask the original error */ }
       }
       res.status(status).json({ error: status >= 500 ? 'Internal server error' : (err.message || 'Client error') });

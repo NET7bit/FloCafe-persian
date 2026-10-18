@@ -1,13 +1,12 @@
 import { Express } from 'express';
 import { authRoutes } from './auth';
-import { requireRole } from '../middleware/security';
-import { ROLE_ACCESS, hasRole } from '../../shared/role-permissions';
+import { requireAnyPermission, requirePermission } from '../services/authorization';
 import { categoryRoutes } from './categories';
 import { productRoutes } from './products';
 import { addonGroupRoutes } from './addon-groups';
 import { orderRoutes } from './orders';
 import { orderItemRoutes } from './order-items';
-import { billRoutes, syncUnpaidBillsForOrder, getTenantCurrency } from './bills';
+import { billRoutes } from './bills';
 import { refundRoutes } from './refunds';
 import { cashClosureRoutes } from './cash-closures';
 import { cashSessionRoutes } from './cash-sessions';
@@ -35,7 +34,6 @@ import { kdsInfoRoutes } from './kds-info';
 import { posInfoRoutes } from './pos-info';
 import { serverAppInfoRoutes } from './server-app-info';
 import { moreAppsRoutes } from './more-apps';
-import { notifyKdsUpdate } from '../services/kds';
 import { printerRoutes } from './printers';
 import { databaseRoutes } from './database';
 import { databaseToolsRoutes } from './database-tools';
@@ -46,9 +44,8 @@ import { printTemplateRoutes } from './print-templates';
 import { whatsappRoutes } from './whatsapp';
 import { supportTicketRoutes } from './support-ticket';
 import { diagnosticsRoutes } from './diagnostics';
-import { getDatabase, now, parseItemJson, attachEffectiveAddons, withTxn, getSettingValue, getCachedPairingCode, setCachedPairingCode, verifyPin, recordOrderAudit } from '../db';
-import { checkPinRateLimit } from './orders';
-import { getCurrencyFractionDigits, getCurrencyMinorUnitFactor } from '../countries';
+import { authorizationRoutes } from './authorization';
+import { getDatabase, getSettingValue, getCachedPairingCode, setCachedPairingCode } from '../db';
 
 const OWNER_MANAGER_ROLE_PLACEHOLDERS = ROLE_ACCESS.ownerManager.map(() => '?').join(', ');
 import {
@@ -85,7 +82,6 @@ function mobilePairingErrorMessage(error: any): string {
 }
 
 const inlineCustomerLookupRateLimit = expressRateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: true, legacyHeaders: false });
-const inlineOrderWriteRateLimit = expressRateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false });
 
 export function registerRoutes(app: Express): void {
   // Auth routes
@@ -136,15 +132,20 @@ export function registerRoutes(app: Express): void {
   app.use('/api/whatsapp', whatsappRoutes);
   app.use('/api/support-ticket', supportTicketRoutes);
   app.use('/api/diagnostics', diagnosticsRoutes);
+  app.use('/api/authorization', authorizationRoutes);
 
-  // Tax preview
-  app.post('/api/tax/preview', asyncHandler(async (req, res) => {
+  // Tax preview. Priced on every cart change in the prepaid checkout modal, so it
+  // has to admit every role that can run a sale; `tax-packs.view-test` (owner and
+  // manager) would 403 a cashier mid-checkout, and a 403 makes the API client
+  // refresh the whole auth context. Any one of the three sale-facing permissions
+  // resolves to the same role set the ungated endpoint had before this migration.
+  app.post('/api/tax/preview', requireAnyPermission('pos.use', 'orders.create', 'kitchen.use'), asyncHandler(async (req, res) => {
     const { calculateTaxPreview } = await import('../services/tax');
     calculateTaxPreview(req, res);
   }));
 
   // Returns active tax categories for product configuration.
-  app.get('/api/tax/categories', requireRole(...ROLE_ACCESS.ownerManager), asyncHandler(async (req, res) => {
+  app.get('/api/tax/categories', requirePermission('tax-packs.view-test'), asyncHandler(async (req, res) => {
     try {
       const { getActiveCountryPack, hasConfiguredTaxCategories, previewCategoryRate } = await import('../services/tax');
       const country = getSettingValue('country') || '';
@@ -177,7 +178,7 @@ export function registerRoutes(app: Express): void {
   }));
 
   // Returns cached mobile pairing code or generates fresh code if missing or expired.
-  app.get('/api/mobile/pairing-code', requireRole(...ROLE_ACCESS.owner), asyncHandler(async (req, res) => {
+  app.get('/api/mobile/pairing-code', requirePermission('mobile-access.manage'), asyncHandler(async (req, res) => {
     try {
       const cached = getCachedPairingCode();
       if (cached) {
@@ -200,7 +201,7 @@ export function registerRoutes(app: Express): void {
   }));
 
   // Explicit rotate — disconnects every currently-paired RevFlo device.
-  app.post('/api/mobile/rotate-code', requireRole(...ROLE_ACCESS.owner), asyncHandler(async (req, res) => {
+  app.post('/api/mobile/rotate-code', requirePermission('mobile-access.manage'), asyncHandler(async (req, res) => {
     try {
       const { code, expires_at } = await cloudSync.generatePairingCode(true);
       setCachedPairingCode(code, expires_at);
@@ -215,7 +216,7 @@ export function registerRoutes(app: Express): void {
   }));
 
   // Paired RevFlo devices for this store — Settings > Mobile App session list.
-  app.get('/api/mobile/devices', requireRole(...ROLE_ACCESS.owner), asyncHandler(async (req, res) => {
+  app.get('/api/mobile/devices', requirePermission('mobile-access.manage'), asyncHandler(async (req, res) => {
     try {
       const devices = await cloudSync.listPairedDevices();
       res.json({ devices });
@@ -226,7 +227,7 @@ export function registerRoutes(app: Express): void {
   }));
 
   // Legacy/flat customer search endpoint (frontend uses this)
-  app.get('/api/customers-search', inlineCustomerLookupRateLimit, requireRole(...ROLE_ACCESS.sales), (req, res) => {
+  app.get('/api/customers-search', inlineCustomerLookupRateLimit, requirePermission('customers.view'), (req, res) => {
     try {
       const { q } = req.query;
       const rawSearch = String(q || '').trim();
@@ -269,7 +270,7 @@ export function registerRoutes(app: Express): void {
   });
 
   // CRM lookup endpoint (frontend uses this)
-  app.get('/api/crm/lookup', inlineCustomerLookupRateLimit, requireRole(...ROLE_ACCESS.sales), (req, res) => {
+  app.get('/api/crm/lookup', inlineCustomerLookupRateLimit, requirePermission('customers.view'), (req, res) => {
     try {
       const { phone, country_code } = req.query;
       if (!phone) {

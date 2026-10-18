@@ -1,9 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import expressRateLimit from 'express-rate-limit';
-import { requireRole } from '../middleware/security';
-import { cloudSync, DiagnosticEventInput, isAllowedDiagnosticEventCode } from '../services/cloud-sync';
-import { ROLE_ACCESS } from '../../shared/role-permissions';
+import { requirePermission } from '../services/authorization';
+import { cloudSync, DiagnosticEventInput, DIAGNOSTIC_LOG_MAX_ROWS, isAllowedDiagnosticEventCode } from '../services/cloud-sync';
+import { buildSystemDiagnostics, resolveCategory } from './support-ticket';
 
 const router = Router();
 
@@ -85,7 +85,7 @@ export function buildDiagnosticEvent(body: unknown): DiagnosticEventInput | null
   };
 }
 
-router.post('/event', requireRole(...ROLE_ACCESS.allStaff), diagnosticsWriteRateLimit, (req: Request, res: Response) => {
+router.post('/event', requirePermission('support.use'), diagnosticsWriteRateLimit, (req: Request, res: Response) => {
   const event = buildDiagnosticEvent(req.body);
   if (!event) return res.status(400).json({ error: 'Invalid diagnostic event' });
   try {
@@ -93,6 +93,40 @@ router.post('/event', requireRole(...ROLE_ACCESS.allStaff), diagnosticsWriteRate
     cloudSync.reportDiagnostic(event);
   } catch { /* diagnostics must never mask the original failure */ }
   res.status(202).json({ queued: true });
+});
+
+// Local read for the diagnostics screen; nothing here is transmitted.
+router.get('/recent', requirePermission('support.use'), (req: Request, res: Response) => {
+  const limitRaw = Number(req.query.limit);
+  const limit = Number.isSafeInteger(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, DIAGNOSTIC_LOG_MAX_ROWS) : 50;
+  res.json({ failures: cloudSync.listLocalDiagnostics(limit) });
+});
+
+// Erasing the evidence is destructive, so it takes the same permission as
+// changing the transmission setting rather than the read path's support.use.
+router.delete('/recent', requirePermission('settings.manage'), (req: Request, res: Response) => {
+  res.json({ removed: cloudSync.clearLocalDiagnostics() });
+});
+
+// The raw log tail is deliberately absent: it can carry order and customer
+// detail, so the operator adds it on the screen after seeing what it is.
+router.get('/support-bundle', requirePermission('support.use'), (req: Request, res: Response) => {
+  const limitRaw = Number(req.query.limit);
+  const limit = Number.isSafeInteger(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, DIAGNOSTIC_LOG_MAX_ROWS) : 50;
+  const failures = cloudSync.listLocalDiagnostics(limit);
+  res.json({
+    bundle: {
+      system: buildSystemDiagnostics(req, resolveCategory(req.query.category)),
+      recent_failures: failures.map((failure) => ({
+        occurred_at: failure.occurred_at,
+        event_code: failure.event_code,
+        severity: failure.severity,
+        signature: failure.signature,
+        summary: failure.summary,
+        ...(failure.metadata ? { metadata: failure.metadata } : {}),
+      })),
+    },
+  });
 });
 
 export const diagnosticsRoutes = router;

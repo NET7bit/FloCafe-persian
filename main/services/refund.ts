@@ -16,8 +16,6 @@ const LOYALTY_REDEMPTION_RATE = 1;
 // Items already served/completed become refundable once an order is past the short window below.
 const REFUND_ITEM_ELIGIBLE_STATUSES = ['preparing', 'ready', 'served', 'completed'];
 const REFUND_WINDOW_MS = 60 * 60 * 1000;
-// Terminal item statuses excluded from active order calculations.
-export const TERMINAL_ITEM_STATUSES = ['cancelled', 'voided', 'void_adjustment', 'refunded'];
 
 export function getTenantCurrency(db?: Database): string {
   const explicit = db ? (db.prepare("SELECT value FROM settings WHERE key = 'currency'").get() as any)?.value : getSettingValue('currency');
@@ -103,7 +101,7 @@ export function createRefund(db: Database, req: RefundRequest): RefundResult {
   const orderCreatedAt = parseDbTimestamp(order.created_at).getTime();
   if (!Number.isFinite(orderCreatedAt)) throw httpError('Order creation time is invalid', 500);
   const nowMs = Date.now();
-  // Past the short window, an owner-only PIN is required for the rest of the business day (docs/business-decisions.md).
+  // Past the short window, an owner-only PIN is required for the rest of the business day (docs/reference/product-invariants.md).
   let lateRefund = false;
   if (nowMs - orderCreatedAt > REFUND_WINDOW_MS) {
     // Resolves through the country profile when the stored timezone is

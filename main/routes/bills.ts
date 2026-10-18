@@ -9,6 +9,7 @@ import {
   now,
   parseItemJson,
   parseRowJson,
+  recordOrderAudit,
   utcTodayDate,
   verifyPin,
   withTxn,
@@ -17,17 +18,15 @@ import { asyncHandler } from '../middleware/async-handler';
 import { notifyKdsUpdate, notifyOrderUpdated } from '../services/kds';
 import { printReceipt } from '../services/receipt';
 import { cloudSync } from '../services/cloud-sync';
-import { requireRole } from '../middleware/security';
+import { hasPermission, requirePermission } from '../services/authorization';
+import { ROLE_ACCESS, hasRole } from '../../shared/role-permissions';
 import { getOpenSession, isCashTender, NO_CASH_SESSION_ID, requireOpenSessionForCashTender } from '../services/shift-session-gate';
-import { ROLE_ACCESS } from '../../shared/role-permissions';
 import {
-  calculateConfiguredChargeTaxes,
-  combineItemAndChargeTaxes,
   getActiveCountryPack,
   scaleTaxSnapshots,
 } from '../services/tax';
 import { applyPayableRounding } from '../services/tax-engine';
-import { calculateOrderTotals } from '../services/orders';
+import { calculateOrderTotals, recomputeOrderTotals } from '../services/orders';
 import { createReceivableEntry } from '../services/receivables';
 import { recordBillPaymentAccounting } from '../services/accounting-sales-adapter';
 import { recordBillCogsAccounting } from '../services/accounting-cogs-adapter';
@@ -39,7 +38,58 @@ import {
 } from '../countries';
 
 const router = Router();
-const OWNER_MANAGER_ROLE_PLACEHOLDERS = ROLE_ACCESS.ownerManager.map(() => '?').join(', ');
+
+function checkKitchenDeliveryStatus(
+  db: ReturnType<typeof getDatabase>,
+  orderId: string | number,
+  overridePin?: unknown,
+  clientIp = 'unknown',
+  billId?: string | number,
+): { allowed: boolean; count: number; items: string[]; overridden?: boolean; managerUserId?: string } {
+  const setting = db.prepare("SELECT value FROM settings WHERE key = 'require_kitchen_delivered_before_settlement'").get() as { value: string } | undefined;
+  const kdsEnabled = db.prepare("SELECT value FROM settings WHERE key = 'kds_enabled'").get() as { value: string } | undefined;
+  const billingType = db.prepare("SELECT value FROM settings WHERE key = 'billing_type'").get() as { value: string } | undefined;
+  if (setting?.value !== 'true' || kdsEnabled?.value === 'false' || billingType?.value === 'prepaid') {
+    return { allowed: true, count: 0, items: [] };
+  }
+
+  const hasBillItems = billId !== undefined
+    && db.prepare('SELECT 1 FROM bill_items WHERE bill_id = ? LIMIT 1').get(billId);
+  const undeliveredItems = hasBillItems
+    ? db.prepare(`
+        SELECT oi.product_name FROM bill_items bi
+        JOIN order_items oi ON oi.id = bi.order_item_id
+        WHERE bi.bill_id = ? AND bi.quantity > 0 AND oi.order_id = ?
+          AND oi.status IN ('pending', 'preparing', 'ready')
+      `).all(billId, orderId) as { product_name: string }[]
+    : db.prepare(`
+        SELECT product_name FROM order_items
+        WHERE order_id = ? AND status IN ('pending', 'preparing', 'ready')
+      `).all(orderId) as { product_name: string }[];
+  if (undeliveredItems.length === 0) return { allowed: true, count: 0, items: [] };
+
+  const items = undeliveredItems.map((item) => item.product_name);
+  if (overridePin === undefined || overridePin === null || overridePin === '') {
+    return { allowed: false, count: items.length, items };
+  }
+  const rateLimitKey = `pin:${clientIp}:kitchen-delivery`;
+  if (isPinRateLimited(rateLimitKey)) {
+    throw Object.assign(new Error('Too many PIN attempts. Try again in 15 minutes.'), { statusCode: 429 });
+  }
+  if (typeof overridePin !== 'string' || !/^\d{4,6}$/.test(overridePin)) {
+    checkPinRateLimit(rateLimitKey);
+    throw Object.assign(new Error('Invalid manager PIN'), { statusCode: 403 });
+  }
+
+  const managers = db.prepare('SELECT id, role, pin_hash FROM users WHERE pin_hash IS NOT NULL AND is_active = 1').all() as { id: string; role: string; pin_hash: string }[];
+  const manager = managers.find((user) => hasRole(user.role, ROLE_ACCESS.ownerManager) && verifyPin(user.pin_hash, overridePin));
+  if (!manager) {
+    checkPinRateLimit(rateLimitKey);
+    throw Object.assign(new Error('Invalid manager PIN'), { statusCode: 403 });
+  }
+  pinAttempts.delete(rateLimitKey);
+  return { allowed: true, count: items.length, items, overridden: true, managerUserId: manager.id };
+}
 
 export function getTenantCurrency(): string {
   // '' rather than a default country code: resolveTenantCurrency throws
@@ -391,6 +441,19 @@ function checkPinRateLimit(key: string): boolean {
   return true;
 }
 
+function isPinRateLimited(key: string): boolean {
+  const entry = pinAttempts.get(key);
+  if (!entry || Date.now() > entry.resetAt) {
+    pinAttempts.delete(key);
+    return false;
+  }
+  return entry.count >= PIN_MAX_ATTEMPTS;
+}
+
+export function resetPinRateLimitForTests(): void {
+  pinAttempts.clear();
+}
+
 function parsePaginationInteger(value: unknown, defaultValue: number): number | null {
   if (value === undefined || value === null || value === '') return defaultValue;
   if (Array.isArray(value)) return null;
@@ -399,7 +462,7 @@ function parsePaginationInteger(value: unknown, defaultValue: number): number | 
   return parsed;
 }
 
-router.get('/', requireRole(...ROLE_ACCESS.ownerManagerCashier), (req: Request, res: Response) => {
+router.get('/', requirePermission('bills.read'), (req: Request, res: Response) => {
   try {
     const db = getDatabase();
     let query = 'SELECT * FROM bills WHERE 1=1';
@@ -462,7 +525,7 @@ router.get('/', requireRole(...ROLE_ACCESS.ownerManagerCashier), (req: Request, 
   }
 });
 
-router.get('/:id', requireRole(...ROLE_ACCESS.ownerManagerCashier), (req: Request, res: Response) => {
+router.get('/:id', requirePermission('bills.read'), (req: Request, res: Response) => {
   try {
     const db = getDatabase();
     const bill = addBillLoyaltyFields(db, parseRowJson(db.prepare('SELECT * FROM bills WHERE id = ?').get(req.params.id)));
@@ -481,7 +544,7 @@ router.get('/:id', requireRole(...ROLE_ACCESS.ownerManagerCashier), (req: Reques
 });
 
 // Get bill by order ID
-router.get('/order/:orderId', requireRole(...ROLE_ACCESS.ownerManagerCashier), (req: Request, res: Response) => {
+router.get('/order/:orderId', requirePermission('bills.read'), (req: Request, res: Response) => {
   try {
     const db = getDatabase();
     const bill = addBillLoyaltyFields(db, parseRowJson(db.prepare('SELECT * FROM bills WHERE order_id = ? ORDER BY created_at DESC LIMIT 1').get(req.params.orderId)));
@@ -499,7 +562,7 @@ router.get('/order/:orderId', requireRole(...ROLE_ACCESS.ownerManagerCashier), (
   }
 });
 
-router.post('/generate', requireRole(...ROLE_ACCESS.ownerManagerCashier), (req: Request, res: Response) => {
+router.post('/generate', requirePermission('bills.generate'), (req: Request, res: Response) => {
   try {
     const { order_id } = req.body;
 
@@ -1496,7 +1559,7 @@ export function syncUnpaidBillsForOrder(
       allocations.roundOff[index], total, balance, now(), bill.id,
     );
     if (total <= 0 && balance <= 0) {
-      if (bill.payment_status !== 'paid') {
+      if (bill.payment_status !== 'paid' && checkKitchenDeliveryStatus(db, bill.order_id, undefined, 'unknown', bill.id).allowed) {
         db.prepare(`UPDATE bills SET payment_status = 'paid', paid_at = ?, updated_at = ? WHERE id = ?`).run(now(), now(), bill.id);
       }
     } else if (zeroClosed) {
@@ -1506,7 +1569,7 @@ export function syncUnpaidBillsForOrder(
 }
 
 // Split unpaid dine-in bill into independently payable guest checks.
-router.post('/:id/split-check', requireRole(...ROLE_ACCESS.ownerManagerCashier), (req: Request, res: Response) => {
+router.post('/:id/split-check', requirePermission('bills.generate'), (req: Request, res: Response) => {
   try {
     const db = getDatabase();
     if (getSettingValue('split_checks_enabled') !== 'true') return res.status(403).json({ error: 'Split checks are not enabled' });
@@ -1956,7 +2019,9 @@ function applyPaymentBatch(
   idempotencyKey?: string | null,
   requestHash?: string,
   idempotencyUserId?: string,
-): { bill: any; walletDebited: boolean; loyaltyPointsEarned: number } {
+  overridePin?: unknown,
+  clientIp = 'unknown',
+): { bill: any; walletDebited: boolean; loyaltyPointsEarned: number; kitchenDeliveryOverridden?: boolean } {
   if (idempotencyKey && idempotencyUserId) {
     // Look up idempotency record scoped to user or legacy fallback.
     const prior = db.prepare(`
@@ -1983,9 +2048,26 @@ function applyPaymentBatch(
   if (idempotentReplay) {
     return { bill: parseRowJson(db.prepare('SELECT * FROM bills WHERE id = ?').get(billId)), walletDebited: false, loyaltyPointsEarned: 0 };
   }
+  const kitchenStatus = checkKitchenDeliveryStatus(db, bill.order_id, overridePin, clientIp, bill.id);
+  if (!kitchenStatus.allowed) {
+    throw Object.assign(new Error('Kitchen items must be delivered before billing'), {
+      statusCode: 409,
+      code: 'KITCHEN_ITEMS_UNDELIVERED',
+      undeliveredCount: kitchenStatus.count,
+      undeliveredItems: kitchenStatus.items,
+    });
+  }
+  if (kitchenStatus.overridden) {
+    recordOrderAudit(db, {
+      orderId: bill.order_id,
+      actorUserId: String(idempotencyUserId),
+      action: 'kitchen_delivery_override',
+      details: { manager_user_id: kitchenStatus.managerUserId, undelivered_count: kitchenStatus.count },
+    });
+  }
   // Shift enforcement (#279) runs after replay detection: retrying an already
   // recorded payment must succeed even if its shift has since closed.
-  requireOpenSessionForCashTender(db, payments);
+  requireOpenSessionForCashTender(db, prepared.map((line) => line.payment));
   const activeSessionId = getOpenSession(db)?.id ?? NO_CASH_SESSION_ID;
   const currency = getTenantCurrency();
   const minorFactor = getCurrencyMinorUnitFactor(currency);
@@ -2065,7 +2147,12 @@ function applyPaymentBatch(
       }
     }
   }
-  const result = { bill: parseRowJson(db.prepare('SELECT * FROM bills WHERE id = ?').get(billId)), walletDebited, loyaltyPointsEarned };
+  const result = {
+    bill: parseRowJson(db.prepare('SELECT * FROM bills WHERE id = ?').get(billId)),
+    walletDebited,
+    loyaltyPointsEarned,
+    ...(kitchenStatus.overridden ? { kitchenDeliveryOverridden: true } : {}),
+  };
   if (idempotencyKey && requestHash && idempotencyUserId) {
     db.prepare('INSERT INTO payment_idempotency (user_id, idempotency_key, bill_id, request_hash, response_json, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(idempotencyUserId, idempotencyKey, billId, requestHash, JSON.stringify(result), changedAt);
@@ -2073,17 +2160,19 @@ function applyPaymentBatch(
   return result;
 }
 
-router.post('/:id/payment', requireRole(...ROLE_ACCESS.ownerManagerCashier), (req: Request, res: Response) => {
+router.post('/:id/payment', requirePermission('payments.take'), (req: Request, res: Response) => {
   try {
     const payment = req.body;
     if (!payment || typeof payment !== 'object' || Array.isArray(payment)) {
       return res.status(400).json({ error: 'Payment body must be an object' });
     }
     const db = getDatabase();
-    const requestHash = paymentRequestHash(req.params.id as string, [payment], payment.customer_id);
+    const { override_pin, ...paymentLine } = payment;
+    const requestHash = paymentRequestHash(req.params.id as string, [paymentLine], paymentLine.customer_id);
     const result = withTxn(() => applyPaymentBatch(
-      db, req.params.id as string, [payment], payment.customer_id, true,
-      paymentIdempotencyKey(req), requestHash, String((req as any).user.userId),
+      db, req.params.id as string, [paymentLine], paymentLine.customer_id, true,
+      paymentIdempotencyKey(req), requestHash, String((req as any).user.userId), override_pin,
+      req.ip || req.socket.remoteAddress || 'unknown',
     ));
 
     // Post-commit projection: the payment is durable above; accounting
@@ -2099,18 +2188,21 @@ router.post('/:id/payment', requireRole(...ROLE_ACCESS.ownerManagerCashier), (re
   } catch (error: any) {
     const statusCode = error.statusCode || 500;
     console.error('[API] Bill payment failed:', error);
-    res.status(statusCode).json({ error: statusCode >= 500 ? 'Bill payment failed' : error.message });
+    res.status(statusCode).json({
+      error: statusCode >= 500 ? 'Bill payment failed' : error.message,
+      ...(error.code ? { code: error.code, undeliveredCount: error.undeliveredCount, undeliveredItems: error.undeliveredItems } : {}),
+    });
   }
 });
 
 // Atomic split-payment batch endpoint applying payment lines in a single transaction.
-router.post('/:id/payments', requireRole(...ROLE_ACCESS.ownerManagerCashier), (req: Request, res: Response) => {
+router.post('/:id/payments', requirePermission('payments.take'), (req: Request, res: Response) => {
   try {
     const body = req.body;
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return res.status(400).json({ error: 'Payment batch body must be an object' });
     }
-    const { payments, customer_id: bodyCustomerId } = body;
+    const { payments, customer_id: bodyCustomerId, override_pin } = body;
     if (!Array.isArray(payments) || payments.length === 0) {
       return res.status(400).json({ error: 'payments must be a non-empty array' });
     }
@@ -2119,7 +2211,8 @@ router.post('/:id/payments', requireRole(...ROLE_ACCESS.ownerManagerCashier), (r
     const requestHash = paymentRequestHash(req.params.id as string, payments, bodyCustomerId);
     const result = withTxn(() => applyPaymentBatch(
       db, req.params.id as string, payments, bodyCustomerId, false,
-      paymentIdempotencyKey(req), requestHash, String((req as any).user.userId),
+      paymentIdempotencyKey(req), requestHash, String((req as any).user.userId), override_pin,
+      req.ip || req.socket.remoteAddress || 'unknown',
     ));
 
     // Post-commit projection: the payment is durable above; accounting
@@ -2143,17 +2236,19 @@ router.post('/:id/payments', requireRole(...ROLE_ACCESS.ownerManagerCashier), (r
           event_id: randomUUID(),
           event_code: 'payment.batch.failed',
           severity: 'error',
-          message: 'Payment batch failed',
           metadata: { status: statusCode, stage: 'payment_batch' },
           occurred_at: new Date().toISOString(),
-        });
+        }, error);
       } catch { /* diagnostics must never mask the original failure */ }
     }
-    res.status(statusCode).json({ error: statusCode >= 500 ? 'Bill payment failed' : error.message });
+    res.status(statusCode).json({
+      error: statusCode >= 500 ? 'Bill payment failed' : error.message,
+      ...(error.code ? { code: error.code, undeliveredCount: error.undeliveredCount, undeliveredItems: error.undeliveredItems } : {}),
+    });
   }
 });
 
-router.post('/:id/applyDiscount', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.post('/:id/applyDiscount', requirePermission('bills.discount.apply'), (req: Request, res: Response) => {
   try {
     const { type, value, reason } = req.body;
 
@@ -2200,15 +2295,15 @@ router.post('/:id/applyDiscount', requireRole(...ROLE_ACCESS.ownerManager), (req
       const managerId = req.body.manager_id || req.body.user_id;
       let user: any = null;
       if (managerId) {
-        const candidate = db.prepare(`SELECT * FROM users WHERE id = ? AND pin_hash IS NOT NULL AND role IN (${OWNER_MANAGER_ROLE_PLACEHOLDERS}) AND is_active = 1`).get(managerId, ...ROLE_ACCESS.ownerManager) as any;
-        if (candidate && verifyPin(candidate.pin_hash, override_pin)) {
+        const candidate = db.prepare('SELECT * FROM users WHERE id = ? AND pin_hash IS NOT NULL AND is_active = 1').get(managerId) as any;
+        if (candidate && hasRole(candidate.role, ROLE_ACCESS.ownerManager) && hasPermission(candidate.id, 'bills.discount.apply') && verifyPin(candidate.pin_hash, override_pin)) {
           user = candidate;
         }
       }
       if (!user) {
-        const managers = db.prepare(`SELECT * FROM users WHERE pin_hash IS NOT NULL AND role IN (${OWNER_MANAGER_ROLE_PLACEHOLDERS}) AND is_active = 1`).all(...ROLE_ACCESS.ownerManager) as any[];
+        const managers = db.prepare('SELECT * FROM users WHERE pin_hash IS NOT NULL AND is_active = 1').all() as any[];
         for (const u of managers) {
-          if (verifyPin(u.pin_hash, override_pin)) {
+          if (hasRole(u.role, ROLE_ACCESS.ownerManager) && hasPermission(u.id, 'bills.discount.apply') && verifyPin(u.pin_hash, override_pin)) {
             user = u;
             break;
           }
@@ -2244,30 +2339,24 @@ router.post('/:id/applyDiscount', requireRole(...ROLE_ACCESS.ownerManager), (req
       }
     }
 
+    // An unpaid, unsplit bill's items are the order's active items, so the fresh
+    // sum is the only basis: the tax it rescales is a sum over those same items.
+    // The read and the recomputation below sit outside `withTxn` on purpose, and
+    // are safe only because no `await` separates them: adding one opens a window
+    // where the items change between what was summed and what is written.
+    const totals = calculateOrderTotals(db, bill.order_id);
     let discountAmount = 0;
     if (type === 'percentage') {
-      discountAmount = (bill.subtotal * Number(value)) / 100;
+      discountAmount = (totals.subtotal * Number(value)) / 100;
     } else {
       discountAmount = Number(value);
     }
     const currency = getTenantCurrency();
     const decimals = getCurrencyFractionDigits(currency);
-    const minorFactor = getCurrencyMinorUnitFactor(currency);
-    discountAmount = Math.min(discountAmount, bill.subtotal);
+    discountAmount = Math.min(discountAmount, totals.subtotal);
     discountAmount = Number(discountAmount.toFixed(decimals));
 
     // Derive undiscounted tax basis directly from active items to prevent compounding discounts.
-    const {
-      totalTax: itemTaxAmount,
-      exclusiveTax: itemExclusiveTax,
-      allTaxBreakdowns: itemBreakdowns,
-      allTaxSnapshots: itemSnapshots,
-    } = calculateOrderTotals(db, bill.order_id);
-
-    const discountedSubtotal = Math.max(0, bill.subtotal - discountAmount);
-    const taxRatio = bill.subtotal > 0 ? discountedSubtotal / bill.subtotal : 1;
-    const newTaxAmount = Number((itemTaxAmount * taxRatio).toFixed(decimals));
-    const newExclusiveTax = Number((itemExclusiveTax * taxRatio).toFixed(decimals));
     const tenantInfo = {
       country: getSettingValue('country') || '',
       business_type: getSettingValue('business_type') || 'restaurant',
@@ -2278,37 +2367,35 @@ router.post('/:id/applyDiscount', requireRole(...ROLE_ACCESS.ownerManager), (req
     const customer = bill.customer_id
       ? db.prepare('SELECT * FROM customers WHERE id = ?').get(bill.customer_id) as any
       : null;
-    const chargeTaxes = calculateConfiguredChargeTaxes(tenantInfo, {
-      ...order,
-      packaging_charge: bill.packaging_charge || 0,
-      delivery_charge: bill.delivery_charge || 0,
-      service_charge: bill.service_charge || 0,
-    }, customer);
-    const taxRollup = combineItemAndChargeTaxes({
-      itemTaxAmount: newTaxAmount,
-      itemExclusiveTaxAmount: newExclusiveTax,
-      itemBreakdowns,
-      itemSnapshots,
-      itemTaxRatio: taxRatio,
-      chargeTaxes,
-      minorFactor,
+    // The bill is the settlement boundary: it rounds the tax even with no discount
+    // applied, which is why this site passes 'always'. Payable rounding is applied
+    // once, below, to the bill total only.
+    const { taxRollup, total: exactTotal } = recomputeOrderTotals({
+      tenantInfo,
+      chargeContext: {
+        ...order,
+        packaging_charge: bill.packaging_charge || 0,
+        delivery_charge: bill.delivery_charge || 0,
+        service_charge: bill.service_charge || 0,
+      },
+      customer,
+      totals,
+      discountAmount,
+      taxScaling: 'always',
     });
     const taxBreakdownJson = JSON.stringify(taxRollup.breakdowns);
-
-    const preRoundTotal = discountedSubtotal + taxRollup.exclusiveTaxAmount
-      + (bill.delivery_charge || 0) + (bill.packaging_charge || 0) + (bill.service_charge || 0);
-    const exactTotal = Number(preRoundTotal.toFixed(decimals));
     const pack = getActiveCountryPack(tenantInfo.country);
     const { total: newTotal, adjustment: newRoundOff } = applyPayableRounding(exactTotal, pack, currency);
     const newBalance = Math.max(0, newTotal - (bill.paid_amount || 0));
 
     const updatedBill = withTxn(() => {
       db.prepare(`
-        UPDATE bills SET discount_amount = ?, discount_type = ?, discount_value = ?,
+        UPDATE bills SET subtotal = ?, discount_amount = ?, discount_type = ?, discount_value = ?,
           discount_reason = ?, tax_amount = ?, tax_breakdown = ?, tax_snapshot = ?,
           total = ?, round_off = ?, balance = ?, updated_at = ?
         WHERE id = ?
       `).run(
+        totals.subtotal,
         discountAmount, type, value, reason || null, taxRollup.taxAmount, taxBreakdownJson,
         taxRollup.snapshotJson, newTotal, newRoundOff, newBalance, now(), req.params.id,
       );
@@ -2316,11 +2403,12 @@ router.post('/:id/applyDiscount', requireRole(...ROLE_ACCESS.ownerManager), (req
       // orders.total stays the exact, unrounded amount — only the bill (the
       // settlement boundary) holds the pack-rounded payable total (#170).
       db.prepare(`
-        UPDATE orders SET discount_amount = ?, discount_type = ?, discount_value = ?,
+        UPDATE orders SET subtotal = ?, discount_amount = ?, discount_type = ?, discount_value = ?,
           discount_reason = ?, tax_amount = ?, tax_breakdown = ?, tax_snapshot = ?,
           total = ?, round_off = ?, updated_at = ?
         WHERE id = ?
       `).run(
+        totals.subtotal,
         discountAmount, type, value, reason || null, taxRollup.taxAmount, taxBreakdownJson,
         taxRollup.snapshotJson, exactTotal, 0, now(), bill.order_id,
       );
@@ -2337,7 +2425,7 @@ router.post('/:id/applyDiscount', requireRole(...ROLE_ACCESS.ownerManager), (req
   }
 });
 
-router.post('/:id/markPrinted', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.post('/:id/markPrinted', requirePermission('bills.print'), (req: Request, res: Response) => {
   try {
     const db = getDatabase();
     const bill = db.prepare('SELECT * FROM bills WHERE id = ?').get(req.params.id);
@@ -2357,7 +2445,7 @@ router.post('/:id/markPrinted', requireRole(...ROLE_ACCESS.ownerManager), (req: 
 });
 
 // POST /api/bills/:id/print - Print or reprint bill
-router.post('/:id/print', requireRole(...ROLE_ACCESS.ownerManagerCashier), asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/print', requirePermission('printing.execute'), asyncHandler(async (req: Request, res: Response) => {
   try {
     const { print_type } = req.body;
 
@@ -2379,7 +2467,7 @@ router.post('/:id/print', requireRole(...ROLE_ACCESS.ownerManagerCashier), async
 }));
 
 // GET /api/bills/:id/print-history - Get print history for bill
-router.get('/:id/print-history', requireRole(...ROLE_ACCESS.ownerManagerCashier), (req: Request, res: Response) => {
+router.get('/:id/print-history', requirePermission('bills.read'), (req: Request, res: Response) => {
   try {
     const db = getDatabase();
     const prints = db.prepare(`

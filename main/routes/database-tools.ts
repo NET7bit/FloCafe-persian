@@ -2,22 +2,23 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { resetDatabaseWithBackup, resetDatabaseForCurrencyChange, getCurrencyResetImpact, listBackups, deleteBackup, getCurrentSchemaVersion, getDatabase } from '../db';
 import { clearInMemoryRevokedTokens, clearUserAuthCache, requireRole, authRateLimit } from '../middleware/security';
+import { requirePermission } from '../services/authorization';
 import { requireMasterPin } from '../middleware/master-pin';
 import { asyncHandler } from '../middleware/async-handler';
 import { runHealthCheck, applySafeFixes } from '../services/schema-health';
 import { isMasterPinAvailable, isMasterPinSet, resetMasterPin } from '../services/master-pin';
-import { clearJWTSecretCache } from './auth';
+import { clearJWTSecretCache } from '../security/jwt-secret';
 import { getHttpRequestSignal } from '../shutdown';
-import { ROLE_ACCESS } from '../../shared/role-permissions';
 import { googleDrive } from '../services/google-drive';
 import { isSupportedCurrencyCode } from '../../shared/currencies';
+import { ROLE_ACCESS } from '../../shared/role-permissions';
 
 type AuthenticatedRequest = Request & { user?: { userId?: string; role?: string } };
 
 const router = Router();
 
 // Read-only / additive-only — not master-PIN gated, only owner-gated.
-router.get('/health-check', requireRole(...ROLE_ACCESS.owner), (_req: Request, res: Response) => {
+router.get('/health-check', requirePermission('database.manage'), (_req: Request, res: Response) => {
   try {
     res.json(runHealthCheck());
   } catch (error: any) {
@@ -26,7 +27,7 @@ router.get('/health-check', requireRole(...ROLE_ACCESS.owner), (_req: Request, r
   }
 });
 
-router.post('/apply-safe-fixes', requireRole(...ROLE_ACCESS.owner), (req: Request, res: Response) => {
+router.post('/apply-safe-fixes', requirePermission('database.manage'), (req: Request, res: Response) => {
   try {
     const body = (req.body && typeof req.body === 'object' ? req.body : {}) as { findingIds?: unknown };
     const { findingIds } = body;
@@ -42,7 +43,7 @@ router.post('/apply-safe-fixes', requireRole(...ROLE_ACCESS.owner), (req: Reques
 
 // Read-only listing of the managed backups/ directory (#120). Not master-PIN
 // gated — same read-only rationale as /health-check.
-router.get('/backups', requireRole(...ROLE_ACCESS.owner), (_req: Request, res: Response) => {
+router.get('/backups', requirePermission('database.manage'), (_req: Request, res: Response) => {
   try {
     res.json({ backups: listBackups() });
   } catch (error: any) {
@@ -52,7 +53,7 @@ router.get('/backups', requireRole(...ROLE_ACCESS.owner), (_req: Request, res: R
 });
 
 // Deletes one backup from the managed backups directory, protected by Master PIN.
-router.post('/backups/:fileName/delete', requireRole(...ROLE_ACCESS.owner), requireMasterPin, (req: Request, res: Response) => {
+router.post('/backups/:fileName/delete', requirePermission('database.manage'), requireMasterPin, (req: Request, res: Response) => {
   try {
     deleteBackup(req.params.fileName as string);
     res.json({ success: true });
@@ -68,7 +69,7 @@ router.post('/backups/:fileName/delete', requireRole(...ROLE_ACCESS.owner), requ
   }
 });
 
-router.get('/master-pin/status', requireRole(...ROLE_ACCESS.owner), (_req: Request, res: Response) => {
+router.get('/master-pin/status', requirePermission('database.manage'), (_req: Request, res: Response) => {
   res.json({ available: isMasterPinAvailable(), isSet: isMasterPinSet(), schemaVersion: getCurrentSchemaVersion() });
 });
 
@@ -113,7 +114,7 @@ router.post('/master-pin/reset', authRateLimit(), requireRole(...ROLE_ACCESS.own
 
 const INITIALIZE_CONFIRM_PHRASE = 'INITIALIZE';
 
-router.get('/currency-reset-impact', requireRole(...ROLE_ACCESS.owner), (_req: Request, res: Response) => {
+router.get('/currency-reset-impact', requirePermission('database.manage'), (_req: Request, res: Response) => {
   try {
     res.json(getCurrencyResetImpact());
   } catch (error: unknown) {
@@ -122,7 +123,7 @@ router.get('/currency-reset-impact', requireRole(...ROLE_ACCESS.owner), (_req: R
   }
 });
 
-router.post('/currency-reset', requireRole(...ROLE_ACCESS.owner), requireMasterPin, asyncHandler(async (req: Request, res: Response) => {
+router.post('/currency-reset', requirePermission('database.manage'), requireMasterPin, asyncHandler(async (req: Request, res: Response) => {
   const currency = typeof req.body?.currency === 'string' ? req.body.currency.trim().toUpperCase() : '';
   if (!isSupportedCurrencyCode(currency)) {
     return res.status(400).json({ error: 'Invalid or unsupported currency' });
@@ -196,7 +197,7 @@ router.post('/currency-reset', requireRole(...ROLE_ACCESS.owner), requireMasterP
   }
 }));
 
-router.post('/initialize', requireRole(...ROLE_ACCESS.owner), requireMasterPin, asyncHandler(async (req: Request, res: Response) => {
+router.post('/initialize', requirePermission('database.manage'), requireMasterPin, asyncHandler(async (req: Request, res: Response) => {
   if (req.body?.confirmation_phrase !== INITIALIZE_CONFIRM_PHRASE) {
     return res.status(400).json({ error: `Type "${INITIALIZE_CONFIRM_PHRASE}" to confirm` });
   }

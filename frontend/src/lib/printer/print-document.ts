@@ -26,6 +26,7 @@ import {
   resolveTenantCurrency,
 } from '@countries';
 import { resolveTaxComponents } from './tax-components';
+import { shouldShowCustomerNumber } from '@print/document';
 import type { Bill, Order, OrderItem } from '@/lib/types';
 
 /** Business contact facts and visibility flags for one bill print run. */
@@ -46,6 +47,7 @@ export interface BillBusinessOptions {
   showBusinessName?: boolean;
   showCustomerName?: boolean;
   showCustomerPhone?: boolean;
+  deliveryShowCustomerPhoneAlways?: boolean;
   showTableNumber?: boolean;
   isReprint?: boolean;
 }
@@ -156,6 +158,7 @@ export function buildBillPrintData(bill: Bill, opts: BillBusinessOptions = {}): 
       tableName: String(order?.table?.name ?? ''),
       onlinePlatform: String(order?.online_platform ?? ''),
       externalOrderId: String(order?.external_order_id ?? ''),
+      deliveryAddress: String(order?.delivery_address ?? ''),
       items: items.map((item) => ({
         productName: String(item?.product_name ?? ''),
         quantity: Number(item?.quantity) || 0,
@@ -209,7 +212,11 @@ export function buildBillPrintData(bill: Bill, opts: BillBusinessOptions = {}): 
       showTaxBreakdown: opts.showTaxBreakdown === true,
       showTableNumber: opts.showTableNumber !== false,
       showCustomerName: opts.showCustomerName !== false,
-      showCustomerPhone: opts.showCustomerPhone !== false,
+      showCustomerPhone: shouldShowCustomerNumber({
+        showOnReceipts: opts.showCustomerPhone !== false,
+        alwaysForDeliveryOrders: opts.deliveryShowCustomerPhoneAlways !== false,
+        orderType: String(order?.type ?? ''),
+      }),
     },
   };
 }
