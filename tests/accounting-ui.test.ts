@@ -179,7 +179,20 @@ function run(): void {
   const sidebar = read(SIDEBAR_FILE);
   const navEntry = sidebar.split('\n').find((line) => line.includes("href: '/accounting'"));
   assert(Boolean(navEntry), 'sidebar has no /accounting navigation entry');
-  assert(navEntry!.includes('ROLE_ACCESS.ownerManager'), 'sidebar accounting entry must be owner/manager only');
+  // Upstream moved the sidebar from role lists to permission ids, so the
+  // mandate is asserted through the permission registry: the accounting entry
+  // must be permitted for exactly owner and manager (a role-list text match
+  // would pass for any other entry that happens to name those roles).
+  const permissionId = /permission:\s*'([^']+)'/.exec(navEntry!)?.[1];
+  assert(Boolean(permissionId), 'sidebar accounting entry declares a permission id');
+  const { PERMISSION_BY_ID } = require('../shared/permissions');
+  const definition = PERMISSION_BY_ID.get(permissionId);
+  assert(Boolean(definition), `sidebar accounting entry uses an unknown permission '${permissionId}'`);
+  const roles = definition.defaultRoles as readonly string[];
+  assert(
+    roles.length === 2 && roles.includes('owner') && roles.includes('manager'),
+    'sidebar accounting entry must be owner/manager only',
+  );
   console.log('  ✓ sidebar exposes accounting to owner/manager');
 
   // 7. The fiscal-period badge must match the backend gate (`assertNotInClosedPeriod`
