@@ -2264,7 +2264,8 @@
       "settings": "Cilësimet",
       "integrations": "Integrimet",
       "system": "Sistemi",
-      "support": "Mbështetje"
+      "support": "Mbështetje",
+      "accounting": "Kontabiliteti"
     },
     "capabilities": {
       "tablesView": "Shiko tavat",
@@ -2324,7 +2325,9 @@
       "databaseTools": "Përdorni mjetet e bazës së të dhënave dhe kopjet rezerve",
       "serverApp": "Përdorni Server App të pavarur",
       "support": "Kontaktoni me mbështetjen dhe shikoni diagnostikimin",
-      "inventoryManage": "Menaxhoni furnizimet dhe recetat"
+      "inventoryManage": "Menaxhoni furnizimet dhe recetat",
+      "accountingView": "Shiko librin kryesor dhe raportet financiare",
+      "accountingManage": "Regjistro dhe kthe regjistrimet e ditarit"
     },
     "editorSubtitle": "Konfiguroni vlerat e parazgjedhura të rolit ose bëni një përjashtim për një staf. Ndryshimet zbatohen në veprimin e tij të ardhshëm.",
     "roleDefaultsTab": "Vlerat e parazgjedhura të rolit",

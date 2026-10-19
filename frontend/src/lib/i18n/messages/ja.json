@@ -2373,7 +2373,8 @@
       "settings": "設定",
       "integrations": "連携",
       "system": "システム",
-      "support": "サポート"
+      "support": "サポート",
+      "accounting": "会計"
     },
     "capabilities": {
       "tablesView": "テーブルを表示",
@@ -2433,7 +2434,9 @@
       "cloudAccountData": "クラウドアカウントとデータ制御を管理",
       "databaseTools": "データベースツールとバックアップを使用",
       "serverApp": "スタンドアロンのサーバーアプリを使用",
-      "support": "サポートに連絡し診断情報を表示"
+      "support": "サポートに連絡し診断情報を表示",
+      "accountingView": "元帳と財務レポートを表示",
+      "accountingManage": "仕訳の計上と取消"
     },
     "editorSubtitle": "役割の既定値を設定するか、特定のスタッフの例外を作成します。変更は次の操作から適用されます。",
     "roleDefaultsTab": "役割の既定値",

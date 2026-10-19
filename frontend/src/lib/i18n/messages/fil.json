@@ -2373,7 +2373,8 @@
       "settings": "Mga Setting",
       "integrations": "Mga Integration",
       "system": "System",
-      "support": "Suporta"
+      "support": "Suporta",
+      "accounting": "Kontabilidad"
     },
     "capabilities": {
       "tablesView": "Tingnan ang mga mesa",
@@ -2433,7 +2434,9 @@
       "databaseTools": "Gamitin ang mga tool sa database at backup",
       "serverApp": "Gamitin ang standalone Server App",
       "support": "Makipag-ugnayan sa suporta at tingnan ang diagnostics",
-      "inventoryManage": "Pamahalaan ang mga supply at recipe"
+      "inventoryManage": "Pamahalaan ang mga supply at recipe",
+      "accountingView": "Tingnan ang ledger at mga ulat sa pananalapi",
+      "accountingManage": "I-post at i-reverse ang mga journal entry"
     },
     "editorSubtitle": "I-configure ang mga default ng tungkulin o gumawa ng eksepsiyon para sa isang miyembro ng staff. Magkakabisa ang mga pagbabago sa susunod nilang aksyon.",
     "roleDefaultsTab": "Mga default ng tungkulin",

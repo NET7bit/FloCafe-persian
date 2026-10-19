@@ -2373,7 +2373,8 @@
       "settings": "Settings",
       "integrations": "Integrations",
       "system": "System",
-      "support": "Support"
+      "support": "Support",
+      "accounting": "Accounting"
     },
     "capabilities": {
       "tablesView": "View tables",
@@ -2433,7 +2434,9 @@
       "databaseTools": "Use database tools and backups",
       "serverApp": "Use the standalone Server App",
       "support": "Contact support and view diagnostics",
-      "inventoryManage": "Manage supplies and recipes"
+      "inventoryManage": "Manage supplies and recipes",
+      "accountingView": "View the ledger and financial reports",
+      "accountingManage": "Post and reverse journal entries"
     },
     "editorSubtitle": "Configure role defaults or make an exception for one staff member. Changes apply to their next action.",
     "roleDefaultsTab": "Role defaults",

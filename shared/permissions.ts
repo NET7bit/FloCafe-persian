@@ -21,7 +21,8 @@ export type PermissionArea =
   | 'integrations'
   | 'system'
   | 'apps'
-  | 'support';
+  | 'support'
+  | 'accounting';
 
 export type PermissionRisk = 'standard' | 'sensitive' | 'destructive';
 
@@ -129,6 +130,9 @@ export const PERMISSION_DEFINITIONS = [
   { id: 'mobile-access.manage', area: 'system', defaultRoles: OWNER, configurable: true, risk: 'sensitive' },
   { id: 'server-app.use', area: 'apps', defaultRoles: ROLE_ACCESS.serverApp, configurable: true, risk: 'standard' },
   { id: 'support.use', area: 'support', defaultRoles: ALL_STAFF, configurable: true, risk: 'standard' },
+
+  { id: 'accounting.view', area: 'accounting', defaultRoles: OWNER_MANAGER, configurable: true, risk: 'sensitive' },
+  { id: 'accounting.manage', area: 'accounting', defaultRoles: OWNER, configurable: true, risk: 'destructive' },
 ] as const satisfies readonly PermissionDefinitionShape[];
 
 export type PermissionDefinition = typeof PERMISSION_DEFINITIONS[number];

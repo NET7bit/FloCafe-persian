@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { requireRole } from '../middleware/security';
-import { ROLE_ACCESS } from '../../shared/role-permissions';
+import { requirePermission } from '../services/authorization';
 import {
   createManualJournal,
   createOpeningBalance,
@@ -58,7 +57,7 @@ function reversalDate(req: Request): string {
     : new Date().toISOString().slice(0, 10);
 }
 
-router.get('/accounts', requireRole(...ROLE_ACCESS.ownerManager), (_req: Request, res: Response) => {
+router.get('/accounts', requirePermission('accounting.view'), (_req: Request, res: Response) => {
   try {
     res.json({ accounts: listAccounts({ activeOnly: true }) });
   } catch (error: unknown) {
@@ -67,7 +66,7 @@ router.get('/accounts', requireRole(...ROLE_ACCESS.ownerManager), (_req: Request
 });
 
 // Generic manual adjustment — never an opening balance or a module event.
-router.post('/manual-journal', requireRole(...ROLE_ACCESS.owner), (req: Request, res: Response) => {
+router.post('/manual-journal', requirePermission('accounting.manage'), (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const journal = createManualJournal({
@@ -90,7 +89,7 @@ router.post('/manual-journal', requireRole(...ROLE_ACCESS.owner), (req: Request,
 });
 
 // Initial-balance transfer only — not a day-to-day adjustment surface.
-router.post('/opening-balance', requireRole(...ROLE_ACCESS.owner), (req: Request, res: Response) => {
+router.post('/opening-balance', requirePermission('accounting.manage'), (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const journal = createOpeningBalance({
@@ -110,7 +109,7 @@ router.post('/opening-balance', requireRole(...ROLE_ACCESS.owner), (req: Request
   }
 });
 
-router.get('/journals/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/journals/:id', requirePermission('accounting.view'), (req: Request, res: Response) => {
   try {
     res.json({ journal: getJournal(String(req.params.id)) });
   } catch (error: unknown) {
@@ -118,7 +117,7 @@ router.get('/journals/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Requ
   }
 });
 
-router.post('/journals/:id/reverse', requireRole(...ROLE_ACCESS.owner), (req: Request, res: Response) => {
+router.post('/journals/:id/reverse', requirePermission('accounting.manage'), (req: Request, res: Response) => {
   try {
     const journal = reverseJournal(String(req.params.id), actorId(req), reversalDate(req));
     res.status(201).json({ journal });
@@ -129,7 +128,7 @@ router.post('/journals/:id/reverse', requireRole(...ROLE_ACCESS.owner), (req: Re
 
 // Read-only, derived list of receivable settlements whose accounting
 // projection is missing (no journal) or incomplete (no reversal).
-router.get('/receivables/unresolved', requireRole(...ROLE_ACCESS.ownerManager), (_req: Request, res: Response) => {
+router.get('/receivables/unresolved', requirePermission('accounting.view'), (_req: Request, res: Response) => {
   try {
     res.json({ events: listUnresolvedReceivableSettlements() });
   } catch (error: unknown) {
@@ -139,7 +138,7 @@ router.get('/receivables/unresolved', requireRole(...ROLE_ACCESS.ownerManager), 
 
 // Explicitly completes the accounting projection for one receivable source
 // event; the event id is the only client input, identity is server-derived.
-router.post('/receivables/:id/reprocess', requireRole(...ROLE_ACCESS.owner), (req: Request, res: Response) => {
+router.post('/receivables/:id/reprocess', requirePermission('accounting.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
@@ -151,7 +150,7 @@ router.post('/receivables/:id/reprocess', requireRole(...ROLE_ACCESS.owner), (re
 
 // Read-only, derived list of purchase-invoice, supplier-payment and
 // purchase-return events whose accounting projection is missing or incomplete.
-router.get('/purchases/unresolved', requireRole(...ROLE_ACCESS.ownerManager), (_req: Request, res: Response) => {
+router.get('/purchases/unresolved', requirePermission('accounting.view'), (_req: Request, res: Response) => {
   try {
     res.json({ events: listUnresolvedPurchaseEvents() });
   } catch (error: unknown) {
@@ -161,7 +160,7 @@ router.get('/purchases/unresolved', requireRole(...ROLE_ACCESS.ownerManager), (_
 
 // Explicitly completes the accounting projection for one purchase-side source
 // event; kind + source id identify the row, identity is server-derived.
-router.post('/purchases/:kind/:id/reprocess', requireRole(...ROLE_ACCESS.owner), (req: Request, res: Response) => {
+router.post('/purchases/:kind/:id/reprocess', requirePermission('accounting.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
@@ -177,7 +176,7 @@ router.post('/purchases/:kind/:id/reprocess', requireRole(...ROLE_ACCESS.owner),
 
 // Read-only, derived list of expenses whose accounting projection is missing
 // (no journal) or incomplete (no reversal).
-router.get('/expenses/unresolved', requireRole(...ROLE_ACCESS.ownerManager), (_req: Request, res: Response) => {
+router.get('/expenses/unresolved', requirePermission('accounting.view'), (_req: Request, res: Response) => {
   try {
     res.json({ events: listUnresolvedExpenses() });
   } catch (error: unknown) {
@@ -187,7 +186,7 @@ router.get('/expenses/unresolved', requireRole(...ROLE_ACCESS.ownerManager), (_r
 
 // Explicitly completes the accounting projection for one expense source
 // event; the expense id is the only client input, identity is server-derived.
-router.post('/expenses/:id/reprocess', requireRole(...ROLE_ACCESS.owner), (req: Request, res: Response) => {
+router.post('/expenses/:id/reprocess', requirePermission('accounting.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
@@ -199,7 +198,7 @@ router.post('/expenses/:id/reprocess', requireRole(...ROLE_ACCESS.owner), (req: 
 
 // Read-only, derived list of order items whose COGS projection is missing or
 // incomplete (consumed without a journal, or refunded without a reversal).
-router.get('/cogs/unresolved', requireRole(...ROLE_ACCESS.ownerManager), (_req: Request, res: Response) => {
+router.get('/cogs/unresolved', requirePermission('accounting.view'), (_req: Request, res: Response) => {
   try {
     res.json({ events: listUnresolvedCogsEvents() });
   } catch (error: unknown) {
@@ -209,7 +208,7 @@ router.get('/cogs/unresolved', requireRole(...ROLE_ACCESS.ownerManager), (_req: 
 
 // Explicitly completes the accounting projection for one order item; the item
 // id is the only client input, identity is server-derived.
-router.post('/cogs/:id/reprocess', requireRole(...ROLE_ACCESS.owner), (req: Request, res: Response) => {
+router.post('/cogs/:id/reprocess', requirePermission('accounting.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
@@ -234,7 +233,7 @@ function reportRange(req: Request): { from: string | null; to: string | null; pe
   };
 }
 
-router.get('/reports/general-ledger', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/reports/general-ledger', requirePermission('accounting.view'), (req: Request, res: Response) => {
   try {
     res.json({
       report: getGeneralLedger({
@@ -251,7 +250,7 @@ router.get('/reports/general-ledger', requireRole(...ROLE_ACCESS.ownerManager), 
   }
 });
 
-router.get('/reports/trial-balance', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/reports/trial-balance', requirePermission('accounting.view'), (req: Request, res: Response) => {
   try {
     res.json({ report: getTrialBalance(reportRange(req)) });
   } catch (error: unknown) {
@@ -259,7 +258,7 @@ router.get('/reports/trial-balance', requireRole(...ROLE_ACCESS.ownerManager), (
   }
 });
 
-router.get('/reports/profit-loss', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/reports/profit-loss', requirePermission('accounting.view'), (req: Request, res: Response) => {
   try {
     res.json({ report: getProfitAndLoss(reportRange(req)) });
   } catch (error: unknown) {
@@ -267,7 +266,7 @@ router.get('/reports/profit-loss', requireRole(...ROLE_ACCESS.ownerManager), (re
   }
 });
 
-router.get('/reports/balance-sheet', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/reports/balance-sheet', requirePermission('accounting.view'), (req: Request, res: Response) => {
   try {
     res.json({ report: getBalanceSheet(reportRange(req)) });
   } catch (error: unknown) {
@@ -275,7 +274,7 @@ router.get('/reports/balance-sheet', requireRole(...ROLE_ACCESS.ownerManager), (
   }
 });
 
-router.get('/reports/reconciliation', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/reports/reconciliation', requirePermission('accounting.view'), (req: Request, res: Response) => {
   try {
     res.json({ report: getReconciliation(reportRange(req)) });
   } catch (error: unknown) {
@@ -284,7 +283,7 @@ router.get('/reports/reconciliation', requireRole(...ROLE_ACCESS.ownerManager), 
 });
 
 // Structural ledger invariants; read-only.
-router.get('/reports/integrity', requireRole(...ROLE_ACCESS.ownerManager), (_req: Request, res: Response) => {
+router.get('/reports/integrity', requirePermission('accounting.view'), (_req: Request, res: Response) => {
   try {
     res.json({ report: getIntegrityChecks() });
   } catch (error: unknown) {

@@ -151,6 +151,9 @@ export const PERMISSION_LABEL_KEYS = {
 
   'server-app.use': 'serverApp',
   'support.use': 'support',
+
+  'accounting.view': 'accountingView',
+  'accounting.manage': 'accountingManage',
 } as const satisfies Record<PermissionId, PermissionMatrixCapabilityKey>;
 
 /** Permission area → area heading (exhaustively typed against `PermissionArea`). */
@@ -173,6 +176,7 @@ export const PERMISSION_AREA_KEYS = {
   system: 'system',
   apps: 'apps',
   support: 'support',
+  accounting: 'accounting',
 } as const satisfies Record<PermissionArea, PermissionMatrixAreaKey>;
 
 /** Table status → label (exhaustively typed against `Table['status']`). */

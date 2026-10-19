@@ -1345,6 +1345,7 @@ function idFallbackErrors(idFlat: Record<string, string>, enFlat: Record<string,
 
 /** Dutch translation safeguards. */
 const NL_INTENTIONAL_IDENTICAL = new Set<string>([
+  'accounting.accountType', 'accounting.code', 'accounting.credit', 'accounting.details', 'accounting.statusLabel', 'accounting.statusOpen',
   'auth.countryThailand', 'auth.emailPlaceholder', 'businessType.restaurant',
   'common.appTitle', 'common.brandName', 'common.logoAlt', 'common.percentage',
   'common.timeHoursMinutes', 'common.timeMinutes', 'dashboard.minutesValue', 'dashboard.title',

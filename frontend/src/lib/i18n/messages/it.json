@@ -2373,7 +2373,8 @@
       "settings": "Impostazioni",
       "integrations": "Integrazioni",
       "system": "Sistema",
-      "support": "Assistenza"
+      "support": "Assistenza",
+      "accounting": "Contabilità"
     },
     "capabilities": {
       "tablesView": "Visualizza i tavoli",
@@ -2433,7 +2434,9 @@
       "cloudAccountData": "Gestisci controlli account e dati cloud",
       "databaseTools": "Usa strumenti database e backup",
       "serverApp": "Usa l'Server App indipendente",
-      "support": "Contatta l'assistenza e visualizza le diagnostiche"
+      "support": "Contatta l'assistenza e visualizza le diagnostiche",
+      "accountingView": "Visualizza il libro mastro e i report finanziari",
+      "accountingManage": "Registra e storna le scritture contabili"
     },
     "editorSubtitle": "Configura le impostazioni predefinite del ruolo o crea un'eccezione per un membro dello staff. Le modifiche si applicano alla prossima azione.",
     "roleDefaultsTab": "Impostazioni ruolo",

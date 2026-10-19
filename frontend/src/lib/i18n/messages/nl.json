@@ -2264,7 +2264,8 @@
       "settings": "Instellingen",
       "integrations": "Integraties",
       "system": "Systeem",
-      "support": "Ondersteuning"
+      "support": "Ondersteuning",
+      "accounting": "Boekhouding"
     },
     "capabilities": {
       "tablesView": "Tafels bekijken",
@@ -2324,7 +2325,9 @@
       "databaseTools": "Gebruik databasetools en back-ups",
       "serverApp": "Gebruik de zelfstandige server-app",
       "support": "Neem contact op met ondersteuning en bekijk de diagnostiek",
-      "inventoryManage": "Voorraadartikelen en recepten beheren"
+      "inventoryManage": "Voorraadartikelen en recepten beheren",
+      "accountingView": "Grootboek en financiële rapporten bekijken",
+      "accountingManage": "Journaalposten boeken en terugdraaien"
     },
     "editorSubtitle": "Standaardinstellingen per rol configureren of een uitzondering maken voor één medewerker. Wijzigingen gelden vanaf diens volgende actie.",
     "roleDefaultsTab": "Rolstandaarden",

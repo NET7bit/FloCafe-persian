@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { toPosixPath } from './helpers/posix-path';
 
 // Import kill-ports functions
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -260,10 +261,14 @@ if (args[0] === 'ls') {
       path.join(linuxCacheHome, 'flo-desktop'),
     ];
     linuxPaths.forEach(mkdirp);
+    // The Linux branch appends POSIX segments to XDG_*_HOME. On Windows a
+    // host-native base would produce a mixed `C:\...\linux-cache/flo-desktop`
+    // path, which is not what a Linux install ever sees (and which the
+    // deletion guard rejects as an embedded drive prefix).
     const linuxResult = runReset('Linux', {
-      HOME: linuxHome,
-      XDG_CONFIG_HOME: linuxConfigHome,
-      XDG_CACHE_HOME: linuxCacheHome,
+      HOME: toPosixPath(linuxHome),
+      XDG_CONFIG_HOME: toPosixPath(linuxConfigHome),
+      XDG_CACHE_HOME: toPosixPath(linuxCacheHome),
     });
     assert.strictEqual(linuxResult.status, 0, `Expected Linux cache cleanup to pass: ${linuxResult.stderr}`);
     linuxPaths.forEach((cachePath) => {
@@ -278,9 +283,13 @@ if (args[0] === 'ls') {
       path.join(windowsLocalAppData, 'flo-desktop'),
     ];
     windowsPaths.forEach(mkdirp);
+    // The script appends POSIX segments (`$APPDATA/flo-desktop/Cache`). A
+    // backslash drive prefix would not be recognised as an absolute path by the
+    // POSIX layer and the mixed form is rejected as an embedded drive prefix,
+    // so hand the simulation the forward-slash form Git Bash itself uses.
     const windowsResult = runReset('Windows_NT', {
-      APPDATA: windowsAppData,
-      LOCALAPPDATA: windowsLocalAppData,
+      APPDATA: toPosixPath(windowsAppData),
+      LOCALAPPDATA: toPosixPath(windowsLocalAppData),
     });
     assert.strictEqual(windowsResult.status, 0, `Expected Windows cache cleanup to pass: ${windowsResult.stderr}`);
     windowsPaths.forEach((cachePath) => {
@@ -341,8 +350,20 @@ if (args[0] === 'ls') {
     fs.mkdirSync(path.join(fixtureDir, 'scripts/ci'), { recursive: true });
     fs.mkdirSync(path.join(fixtureDir, 'tests'), { recursive: true });
 
-    // Copy run-test-shard.cjs
+    // Copy run-test-shard.cjs and the orchestrator it loads the manifest through
     fs.copyFileSync(shardScript, path.join(fixtureDir, 'scripts/ci/run-test-shard.cjs'));
+    fs.copyFileSync(
+      path.join(rootDir, 'scripts/run-test-suite.cjs'),
+      path.join(fixtureDir, 'scripts/run-test-suite.cjs'),
+    );
+
+    // The shard runner reads the ordered manifest, not the `test` script, so the
+    // fixture declares its own list instead of relying on package.json order.
+    const writeManifest = (suites: string[]) =>
+      fs.writeFileSync(
+        path.join(fixtureDir, 'scripts/ci/test-suites.json'),
+        JSON.stringify(suites, null, 2),
+      );
 
     // Create mock tests/run-test.sh
     const runTestSh = `#!/usr/bin/env bash
@@ -372,6 +393,7 @@ exit 0
       },
     };
     fs.writeFileSync(path.join(fixtureDir, 'package.json'), JSON.stringify(fixturePkg, null, 2));
+    writeManifest(['test:suite-1', 'test:suite-2', 'test:suite-3', 'test:suite-4', 'test:suite-5']);
 
     // Test Shard 0 execution (suites 1, 3, 5)
     const shard0 = spawnSync('node', ['scripts/ci/run-test-shard.cjs'], {
@@ -402,6 +424,8 @@ exit 0
     // Test Fail-fast on failing suite
     fixturePkg.scripts.test = fixturePkg.scripts['test-with-fail'];
     fs.writeFileSync(path.join(fixtureDir, 'package.json'), JSON.stringify(fixturePkg, null, 2));
+    // The failing suite sits at manifest index 1, so shard 1 owns it.
+    writeManifest(['test:suite-1', 'test:failing-suite', 'test:suite-3']);
 
     const failingShard = spawnSync('node', ['scripts/ci/run-test-shard.cjs'], {
       encoding: 'utf8',
@@ -447,19 +471,23 @@ exit 0
     );
   }
 
-  const suitePattern = /(?:bash\s+tests\/run-test\.sh\s+)?npm\s+run\s+(test:[\w-]+)/g;
-  const allSuites: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = suitePattern.exec(testScript)) !== null) {
-    if (!allSuites.includes(match[1])) allSuites.push(match[1]);
-  }
+  // The canonical suite order lives in the manifest now; `test` just delegates to
+  // the orchestrator, so parsing the script for `npm run test:*` finds nothing.
+  assert.match(
+    testScript,
+    /run-test-suite\.cjs/,
+    'the "test" script must delegate to the manifest orchestrator',
+  );
+  const allSuites = JSON.parse(
+    fs.readFileSync(path.join(rootDir, 'scripts/ci/test-suites.json'), 'utf8'),
+  ) as string[];
 
-  assert.ok(allSuites.length >= 90, `Expected at least 90 test suites in "test" script, got ${allSuites.length}`);
+  assert.ok(allSuites.length >= 90, `Expected at least 90 test suites in the manifest, got ${allSuites.length}`);
 
   for (const suiteName of allSuites) {
     assert.ok(
       suiteName in realPkg.scripts,
-      `Suite "${suiteName}" extracted from "test" script must exist in package.json scripts`,
+      `Suite "${suiteName}" listed in the manifest must exist in package.json scripts`,
     );
   }
 

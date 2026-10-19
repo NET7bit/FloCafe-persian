@@ -2373,7 +2373,8 @@
       "settings": "Einstellungen",
       "integrations": "Integrationen",
       "system": "System",
-      "support": "Support"
+      "support": "Support",
+      "accounting": "Buchhaltung"
     },
     "capabilities": {
       "tablesView": "Tische ansehen",
@@ -2433,7 +2434,9 @@
       "databaseTools": "Datenbankwerkzeuge und Sicherungen nutzen",
       "serverApp": "Eigenständige Bedienungs-App verwenden",
       "support": "Support kontaktieren und Diagnosedaten einsehen",
-      "inventoryManage": "Vorräte und Rezepte verwalten"
+      "inventoryManage": "Vorräte und Rezepte verwalten",
+      "accountingView": "Hauptbuch und Finanzberichte anzeigen",
+      "accountingManage": "Journalbuchungen erfassen und stornieren"
     },
     "editorSubtitle": "Konfigurieren Sie Rollenvorgaben oder legen Sie eine Ausnahme für ein Teammitglied fest. Änderungen gelten ab der nächsten Aktion.",
     "roleDefaultsTab": "Rollenvorgaben",

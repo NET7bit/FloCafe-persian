@@ -2264,7 +2264,8 @@
       "settings": "Cài đặt",
       "integrations": "Tích hợp",
       "system": "Hệ thống",
-      "support": "Hỗ trợ"
+      "support": "Hỗ trợ",
+      "accounting": "Kế toán"
     },
     "capabilities": {
       "tablesView": "Xem bàn",
@@ -2324,7 +2325,9 @@
       "databaseTools": "Sử dụng công cụ cơ sở dữ liệu và sao lưu",
       "serverApp": "Sử dụng Server App độc lập",
       "support": "Liên hệ hỗ trợ và xem chẩn đoán",
-      "inventoryManage": "Quản lý vật tư và công thức"
+      "inventoryManage": "Quản lý vật tư và công thức",
+      "accountingView": "Xem sổ cái và báo cáo tài chính",
+      "accountingManage": "Ghi và đảo bút toán nhật ký"
     },
     "editorSubtitle": "Cấu hình mặc định theo vai trò hoặc tạo ngoại lệ cho một nhân viên. Thay đổi sẽ áp dụng từ hành động tiếp theo của họ.",
     "roleDefaultsTab": "Mặc định vai trò",

@@ -2264,7 +2264,8 @@
       "settings": "設定",
       "integrations": "整合",
       "system": "系統",
-      "support": "支援"
+      "support": "支援",
+      "accounting": "會計"
     },
     "capabilities": {
       "tablesView": "檢視桌位",
@@ -2324,7 +2325,9 @@
       "cloudAccountData": "管理雲端帳戶和資料控制",
       "databaseTools": "使用資料庫工具和備份",
       "serverApp": "使用獨立服務員應用程式",
-      "support": "聯絡支援並檢視診斷"
+      "support": "聯絡支援並檢視診斷",
+      "accountingView": "檢視總帳與財務報表",
+      "accountingManage": "登錄與沖銷分錄"
     },
     "editorSubtitle": "設定角色預設值，或為單一位員工建立例外。變更會從他的下一個操作開始生效。",
     "roleDefaultsTab": "角色預設值",

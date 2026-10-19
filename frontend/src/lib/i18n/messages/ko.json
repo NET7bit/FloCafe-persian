@@ -2373,7 +2373,8 @@
       "settings": "설정",
       "integrations": "연동",
       "system": "시스템",
-      "support": "지원"
+      "support": "지원",
+      "accounting": "회계"
     },
     "capabilities": {
       "tablesView": "테이블 보기",
@@ -2433,7 +2434,9 @@
       "cloudAccountData": "클라우드 계정 및 데이터 관리",
       "databaseTools": "데이터베이스 도구 및 백업 사용",
       "serverApp": "독립형 서버 앱(Server App) 사용",
-      "support": "지원팀 문의 및 진단 정보 보기"
+      "support": "지원팀 문의 및 진단 정보 보기",
+      "accountingView": "원장 및 재무 보고서 보기",
+      "accountingManage": "분개 입력 및 취소"
     },
     "editorSubtitle": "역할 기본값을 구성하거나 특정 직원에 대한 예외를 만드세요. 변경 사항은 다음 작업부터 적용됩니다.",
     "roleDefaultsTab": "역할 기본값",

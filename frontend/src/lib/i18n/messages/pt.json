@@ -2373,7 +2373,8 @@
       "settings": "Configurações",
       "integrations": "Integrações",
       "system": "Sistema",
-      "support": "Suporte"
+      "support": "Suporte",
+      "accounting": "Contabilidade"
     },
     "capabilities": {
       "tablesView": "Ver mesas",
@@ -2433,7 +2434,9 @@
       "databaseTools": "Usar ferramentas e backups do banco de dados",
       "serverApp": "Usar o aplicativo independente do servidor",
       "support": "Contatar o suporte e ver diagnósticos",
-      "inventoryManage": "Gerenciar insumos e receitas"
+      "inventoryManage": "Gerenciar insumos e receitas",
+      "accountingView": "Ver o razão e os relatórios financeiros",
+      "accountingManage": "Lançar e estornar partidas contábeis"
     },
     "editorSubtitle": "Configure os padrões da função ou crie uma exceção para um funcionário. As alterações se aplicam na próxima ação dele.",
     "roleDefaultsTab": "Padrões da função",

@@ -2373,7 +2373,8 @@
       "settings": "Pengaturan",
       "integrations": "Integrasi",
       "system": "Sistem",
-      "support": "Dukungan"
+      "support": "Dukungan",
+      "accounting": "Akuntansi"
     },
     "capabilities": {
       "tablesView": "Lihat meja",
@@ -2433,7 +2434,9 @@
       "cloudAccountData": "Mengelola kontrol akun dan data cloud",
       "databaseTools": "Menggunakan alat basis data dan pencadangan",
       "serverApp": "Menggunakan Aplikasi Server mandiri",
-      "support": "Menghubungi dukungan dan melihat diagnostik"
+      "support": "Menghubungi dukungan dan melihat diagnostik",
+      "accountingView": "Lihat buku besar dan laporan keuangan",
+      "accountingManage": "Posting dan balik entri jurnal"
     },
     "editorSubtitle": "Konfigurasikan default peran atau buat pengecualian untuk satu staf. Perubahan berlaku pada tindakan berikutnya.",
     "roleDefaultsTab": "Default peran",

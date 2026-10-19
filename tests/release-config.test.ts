@@ -891,23 +891,35 @@ exit 1
 
   const ciWorkflow = loadWorkflow('ci.yml');
   const requiredGateJob = ciWorkflow.jobs['required-checks-gate'];
-  assert.deepEqual(requiredGateJob.needs, ['changes', 'linux-baseline', 'e2e-playwright', 'windows-uninstaller']);
+  // The gate must depend on every workflow job; pinning a fixed subset let a
+  // newly added job fail without blocking the required checks.
+  const gateNeeds: string[] = Array.isArray(requiredGateJob.needs) ? requiredGateJob.needs : [requiredGateJob.needs];
+  assert.deepEqual(
+    [...gateNeeds].sort(),
+    Object.keys(ciWorkflow.jobs).filter((name: string) => name !== 'required-checks-gate').sort(),
+    'the gate must need every workflow job (a dropped job lets its failure hide)',
+  );
   assert.equal(requiredGateJob.if, 'always()', 'the gate must still report a conclusion when a path-filtered dependency is skipped');
   const requiredGateStep = findStep(requiredGateJob, 'Verify no required job actually failed');
   assertShellStep(requiredGateJob, 'Verify no required job actually failed');
-  const gateExpressions = (changesResult: string, results: [string, string, string]) => ({
-    'needs.changes.result': changesResult,
-    'needs.linux-baseline.result': results[0],
-    'needs.e2e-playwright.result': results[1],
-    'needs.windows-uninstaller.result': results[2],
-  });
-  const gatePassesAllSkipped = executeWorkflowStep(requiredGateStep, { expressions: gateExpressions('success', ['skipped', 'skipped', 'skipped']) });
+  const gateExpressions = (changesResult: string, others: string | ((job: string) => string)) => {
+    const expressions: Record<string, string> = {};
+    for (const job of gateNeeds) {
+      if (job === 'changes') {
+        expressions['needs.changes.result'] = changesResult;
+        continue;
+      }
+      expressions[`needs.${job}.result`] = typeof others === 'function' ? others(job) : others;
+    }
+    return expressions;
+  };
+  const gatePassesAllSkipped = executeWorkflowStep(requiredGateStep, { expressions: gateExpressions('success', 'skipped') });
   assert.equal(gatePassesAllSkipped.status, 0, 'a docs/workflow-only PR that skips every path-filtered job must still pass the gate');
-  const gatePassesMixed = executeWorkflowStep(requiredGateStep, { expressions: gateExpressions('success', ['success', 'skipped', 'success']) });
+  const gatePassesMixed = executeWorkflowStep(requiredGateStep, { expressions: gateExpressions('success', (job) => (job === 'e2e-playwright' ? 'skipped' : 'success')) });
   assert.equal(gatePassesMixed.status, 0, gatePassesMixed.stderr);
-  const gateFailsOnRealFailure = executeWorkflowStep(requiredGateStep, { expressions: gateExpressions('success', ['success', 'failure', 'success']) });
+  const gateFailsOnRealFailure = executeWorkflowStep(requiredGateStep, { expressions: gateExpressions('success', (job) => (job === 'e2e-playwright' ? 'failure' : 'success')) });
   assert.notEqual(gateFailsOnRealFailure.status, 0, 'the gate must not mask an actual job failure as passing');
-  const gateFailsWhenChangesFails = executeWorkflowStep(requiredGateStep, { expressions: gateExpressions('failure', ['skipped', 'skipped', 'skipped']) });
+  const gateFailsWhenChangesFails = executeWorkflowStep(requiredGateStep, { expressions: gateExpressions('failure', 'skipped') });
   assert.notEqual(
     gateFailsWhenChangesFails.status,
     0,
@@ -945,7 +957,7 @@ cat "$CI_TEST_RUNS_FIXTURE"
   try {
     const gateSuperseded = executeWorkflowStep(requiredGateStep, {
       env: gateEnv([newerPush, thisPush]),
-      expressions: gateExpressions('cancelled', ['cancelled', 'cancelled', 'cancelled']),
+      expressions: gateExpressions('cancelled', 'cancelled'),
       fakeCommands: { gh: fakeRunsGh },
     });
     assert.notEqual(
@@ -964,7 +976,7 @@ cat "$CI_TEST_RUNS_FIXTURE"
 
     const gateCancelledWithoutNewerPush = executeWorkflowStep(requiredGateStep, {
       env: gateEnv([otherBranchRun, thisPush]),
-      expressions: gateExpressions('cancelled', ['cancelled', 'cancelled', 'cancelled']),
+      expressions: gateExpressions('cancelled', 'cancelled'),
       fakeCommands: { gh: fakeRunsGh },
     });
     assert.notEqual(
@@ -980,7 +992,7 @@ cat "$CI_TEST_RUNS_FIXTURE"
 
     const gateFailureIsNotSuperseded = executeWorkflowStep(requiredGateStep, {
       env: gateEnv([newerPush, thisPush]),
-      expressions: gateExpressions('cancelled', ['cancelled', 'failure', 'cancelled']),
+      expressions: gateExpressions('cancelled', (job) => (job === 'e2e-playwright' ? 'failure' : 'cancelled')),
       fakeCommands: { gh: fakeRunsGh },
     });
     assert.notEqual(
@@ -997,7 +1009,7 @@ cat "$CI_TEST_RUNS_FIXTURE"
 
     const gateLookupFails = executeWorkflowStep(requiredGateStep, {
       env: gateEnv([newerPush, thisPush], { CI_TEST_GH_FAIL: '1' }),
-      expressions: gateExpressions('cancelled', ['cancelled', 'cancelled', 'cancelled']),
+      expressions: gateExpressions('cancelled', 'cancelled'),
       fakeCommands: { gh: fakeRunsGh },
     });
     assert.notEqual(

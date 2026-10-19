@@ -22,6 +22,11 @@ const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'flo-country-provenance-')
 let stubLocale = 'es-DO';
 let stubLocaleCountry = 'DO';
 
+// SEC-02 wraps cloud_api_key in a `flosec1:` envelope produced by OS-backed
+// safeStorage. Registration persists that key, so the stub has to provide a
+// working (if fake) round-trip instead of leaving safeStorage undefined.
+const ENC_MARKER = 'enc(';
+
 Module._load = function (request: string, parent: unknown, isMain: boolean) {
   if (request === 'electron') {
     return {
@@ -31,6 +36,16 @@ Module._load = function (request: string, parent: unknown, isMain: boolean) {
         getVersion: () => 'test',
         getLocale: () => stubLocale,
         getLocaleCountryCode: () => stubLocaleCountry,
+      },
+      safeStorage: {
+        isEncryptionAvailable: () => true,
+        getSelectedStorageBackend: () => 'dpapi',
+        encryptString: (value: string) => Buffer.from(`${ENC_MARKER}${value})`, 'utf8'),
+        decryptString: (buffer: Buffer) => {
+          const text = buffer.toString('utf8');
+          if (!text.startsWith(ENC_MARKER) || !text.endsWith(')')) throw new Error('decrypt failed');
+          return text.slice(ENC_MARKER.length, -1);
+        },
       },
     };
   }

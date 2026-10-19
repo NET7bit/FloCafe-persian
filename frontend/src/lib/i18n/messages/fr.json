@@ -2373,7 +2373,8 @@
       "settings": "Paramètres",
       "integrations": "Intégrations",
       "system": "Système",
-      "support": "Assistance"
+      "support": "Assistance",
+      "accounting": "Comptabilité"
     },
     "capabilities": {
       "tablesView": "Consulter les tables",
@@ -2433,7 +2434,9 @@
       "databaseTools": "Utiliser les outils de base de données et les sauvegardes",
       "serverApp": "Utiliser l’application serveur autonome",
       "support": "Contacter l’assistance et afficher les diagnostics",
-      "inventoryManage": "Gérer les approvisionnements et les recettes"
+      "inventoryManage": "Gérer les approvisionnements et les recettes",
+      "accountingView": "Voir le grand livre et les rapports financiers",
+      "accountingManage": "Saisir et contre-passer les écritures"
     },
     "editorSubtitle": "Configurez les permissions par défaut d'un rôle ou créez une exception pour un membre du personnel. Les modifications s'appliquent à sa prochaine action.",
     "roleDefaultsTab": "Permissions du rôle",
