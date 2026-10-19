@@ -5,6 +5,7 @@ import { columnsForReceiptPaperSize } from '@print/width';
 import { formatTime } from './format-date';
 import { safePrinterText as writeSafePrinterText, wrapPrinterText, type PrintWarning } from './warnings';
 import { printLabelResolver } from './print-document';
+import { LANGUAGES, type Language } from '@/lib/i18n/languages';
 import { clampDeliverySlipText, sanitizeDeliverySlipPaymentMethod, type DeliverySlipPrintData } from '@print/document';
 
 export type DeliverySlipPayment = NonNullable<DeliverySlipPrintData['payment']>;
@@ -75,6 +76,10 @@ export function buildDeliverySlipBytes(
     arabicShaping = false,
   } = opts;
   const cols = opts.columns ?? CHARS[paperWidth];
+  // Courier slips are handed to a driver, so the date has to read in the same
+  // calendar as the rest of the ticket. Hardcoding en-US printed Gregorian dates
+  // on Persian slips.
+  const locale = LANGUAGES[language as Language]?.locale ?? 'en-US';
   const safePrinterText = writeSafePrinterText;
   const enc = new ReceiptPrinterEncoder({ columns: cols });
 
@@ -90,7 +95,7 @@ export function buildDeliverySlipBytes(
   if (order.type) {
     safePrinterText(enc, `${label('print.kot.type')}: ${order.type.replace(/_/g, ' ').toUpperCase()}`, warnings, false, arabicShaping, undefined, cols, language).newline();
   }
-  safePrinterText(enc, `${label('print.time')}: ${formatTime(order.created_at, 'en-US', timezone ? { timeZone: timezone } : undefined)}`, warnings, false, arabicShaping, undefined, cols, language).newline();
+  safePrinterText(enc, `${label('print.time')}: ${formatTime(order.created_at, locale, timezone ? { timeZone: timezone } : undefined)}`, warnings, false, arabicShaping, undefined, cols, language).newline();
 
   enc.newline();
   enc.align('center');
