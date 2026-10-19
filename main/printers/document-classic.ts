@@ -423,12 +423,19 @@ export function renderBillDocumentToClassicLines(
           segment.sourceLines.main.push(labelOf(block.heading));
           segment.sourceControlLines.main.push(segment.main.at(-1) ?? '');
         }
-        if (block.name) {
+        if (block.name && block.phone) {
+          // Name and phone on one line: a receipt is read standing up, and a
+          // second line per customer costs paper on every single sale.
+          const phone = options.maskCustomerPhone ? maskPhoneOnReceipt(block.phone.text) : block.phone.text;
+          const combined = `${block.name.text} - ${phone}`;
+          segment.main.push('{CENTER}{FONT_B}' + truncateShapedLine(combined, cols, options.arabicShaping, options.language, options.capabilities) + '{/FONT_B}{/CENTER}');
+          segment.sourceLines.main.push(combined);
+          segment.sourceControlLines.main.push(segment.main.at(-1) ?? '');
+        } else if (block.name) {
           segment.main.push('{CENTER}{FONT_B}' + truncateShapedLine(block.name.text, cols, options.arabicShaping, options.language, options.capabilities) + '{/FONT_B}{/CENTER}');
           segment.sourceLines.main.push(block.name.text);
           segment.sourceControlLines.main.push(segment.main.at(-1) ?? '');
-        }
-        if (block.phone) {
+        } else if (block.phone) {
           const phone = options.maskCustomerPhone ? maskPhoneOnReceipt(block.phone.text) : block.phone.text;
           segment.main.push('{CENTER}' + phone + '{/CENTER}');
           segment.sourceLines.main.push(phone);
