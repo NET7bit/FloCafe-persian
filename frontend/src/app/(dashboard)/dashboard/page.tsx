@@ -226,8 +226,12 @@ export default function DashboardPage() {
   // mask them instead of showing a misleading zero when that permission isn't granted.
   const fmtFinancial = (value: number): string => (canViewFinancials ? fmt(value) : '—');
   const numFinancial = (value: number): string | number => (canViewFinancials ? value : '—');
-  const { formatDateTime } = useFormatDate();
+  const { formatDateTime, formatDate } = useFormatDate();
   const locale = useLocale();
+  // A native <input type="date"> renders in the operating system's locale, so a
+  // Persian store still sees "10/19/2026" next to an otherwise Jalali screen.
+  // Show the tenant-formatted date beside it rather than replacing the picker.
+  const showsCalendarHint = locale.startsWith('fa');
   const timeZone = currentTenant?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   // The store's business day starts at its configured time, not at midnight, so
   // the day picker and its upper bound follow the same rule the cash-close modal
@@ -567,25 +571,35 @@ export default function DashboardPage() {
 
         <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
           {periodMode === 'day' ? (
-            <div className="relative">
-              <input
-                ref={dayInputRef}
-                type="date"
-                value={selectedDate}
-                max={todayLocal}
-                onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
-                className="h-10 appearance-none rounded-xl border border-border bg-card ps-3 pe-10 text-sm text-foreground shadow-sm [color-scheme:light] focus:outline-none focus:ring-2 focus:ring-brand/30 dark:[color-scheme:dark] [&::-webkit-calendar-picker-indicator]:pointer-events-none [&::-webkit-calendar-picker-indicator]:opacity-0"
-                aria-label={t('selectDate')}
-              />
-              <button
-                type="button"
-                onClick={() => openPicker(dayInputRef.current)}
-                className="absolute inset-y-0 end-0 z-10 flex w-9 items-center justify-center rounded-e-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                aria-label={t('openDatePicker')}
-              >
-                <CalendarDays size={16} />
-              </button>
-            </div>
+            <>
+              {showsCalendarHint && (
+                <span
+                  className="rounded-lg bg-muted px-2.5 py-1 text-xs text-muted-foreground"
+                  aria-live="polite"
+                >
+                  {formatDate(new Date(`${selectedDate}T12:00:00Z`))}
+                </span>
+              )}
+              <div className="relative">
+                <input
+                  ref={dayInputRef}
+                  type="date"
+                  value={selectedDate}
+                  max={todayLocal}
+                  onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+                  className="h-10 appearance-none rounded-xl border border-border bg-card ps-3 pe-10 text-sm text-foreground shadow-sm [color-scheme:light] focus:outline-none focus:ring-2 focus:ring-brand/30 dark:[color-scheme:dark] [&::-webkit-calendar-picker-indicator]:pointer-events-none [&::-webkit-calendar-picker-indicator]:opacity-0"
+                  aria-label={t('selectDate')}
+                />
+                <button
+                  type="button"
+                  onClick={() => openPicker(dayInputRef.current)}
+                  className="absolute inset-y-0 end-0 z-10 flex w-9 items-center justify-center rounded-e-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  aria-label={t('openDatePicker')}
+                >
+                  <CalendarDays size={16} />
+                </button>
+              </div>
+            </>
           ) : (
             <div className="relative">
               <input
