@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "recorded_at": "2026-10-14",
+  "method": "eslint --format json; backend = warnings over 'main/' and 'shared/' at repo root; frontend = warnings over '.' in frontend/ (frontend-local eslint). Counted the same way scripts/ci/check-lint-budget.cjs counts them in CI.",
+  "counts": {
+    "backend": 1026,
+    "frontend": 5
+  },
+  "policy": "Ratchet: lint-budget.json ceilings may never exceed these counts without re-recording this baseline, and any re-recording requires a reviewed rationale. Warning counts above the ceiling fail CI; reductions are always allowed and the ceiling may be lowered to the new count. tests/lint-budget-ratchet.test.cjs pins these values so a silent ceiling raise fails the test suite.",
+  "recorded_by": "Phase A CI stabilization (owner-approved R1 ratchet option)"
+}

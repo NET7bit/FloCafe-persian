@@ -23,7 +23,7 @@ import {
   truncateShapedLine,
   type PrintWarning,
 } from './formatting-helpers';
-import { buildBillPrintContext, buildBillPrintData } from './document-classic';
+import { buildBillPrintContext, buildBillPrintData, detectPrintLanguageDirection } from './document-classic';
 import {
   buildBillDocument,
   getBlock,
@@ -135,13 +135,18 @@ export function renderBillDocumentToCompactLines(
   // Suffix-unit display (e.g. Toman) declares the unit once — in the amount
   // column header and in each summary row — so item rows stay numeric-only.
   const unit = options.currencyUnit ?? null;
+  // RTL documents mirror the item-table columns; LTR output stays byte-identical.
+  const rtlLayout = detectPrintLanguageDirection(options.language) === 'rtl';
+  const orientedLayouts = (layouts: readonly (RasterTextLayout | undefined)[]): readonly (RasterTextLayout | undefined)[] => rtlLayout
+    ? layouts.map((layout) => (layout ? { ...layout, direction: 'rtl' as const } : undefined))
+    : layouts;
   const amountPrefix = unit ? '' : prefix;
   // Stored amounts are canonical; the suffix unit scales them for display only.
   const displayAmount = (value: number): number => (unit && unit.scale !== 1 ? value * unit.scale : value);
   const summaryAmount = (value: number): string =>
     formatCurrency(displayAmount(value), amountPrefix, options.locale, trimDecimals, fractionDigits, unit?.label ?? null);
   const markGroup = (groupId: string, start: number, sourceLines?: readonly string[], sourceControlLines?: readonly string[], financial = false, sourceLayouts?: readonly (RasterTextLayout | undefined)[]): void => {
-    if (options.rasterGroups && lines.length > start) options.rasterGroups.push({ groupId, lineIndex: start, lineCount: lines.length - start, ...(sourceLines ? { sourceLines } : {}), ...(sourceControlLines ? { sourceControlLines } : {}), ...(sourceLayouts ? { sourceLayouts } : {}), ...(financial ? { financial: true } : {}) });
+    if (options.rasterGroups && lines.length > start) options.rasterGroups.push({ groupId, lineIndex: start, lineCount: lines.length - start, ...(sourceLines ? { sourceLines } : {}), ...(sourceControlLines ? { sourceControlLines } : {}), ...(sourceLayouts ? { sourceLayouts: orientedLayouts(sourceLayouts) } : {}), ...(financial ? { financial: true } : {}) });
   };
   const recordFinancialLines = (start: number, rendered: readonly string[], financial = true): void => {
     if (!financial) return;
@@ -253,8 +258,29 @@ export function renderBillDocumentToCompactLines(
       unit ? Math.min(labelOf(items.header.amount).length + 1, Math.max(1, cols - qtyWidth - 1)) : 0,
     );
     const nameLen = itemNameWidth(cols, amtLen, qtyWidth);
+    const headerStart = lines.length;
     lines.push(compactItemHeader(items, nameLen, amtLen, qtyWidth, options.language, options.capabilities));
     lines.push(dash);
+    // The padded header text cannot survive bidi reordering, so RTL receipts
+    // lay it out with the same columns as the rows it labels.
+    if (options.rasterGroups && rtlLayout) {
+      const headerSourceLine = [labelOf(items.header.item), labelOf(items.header.quantity), labelOf(items.header.amount)].join(' ');
+      options.rasterGroups.push({
+        groupId: 'item-table-header',
+        lineIndex: headerStart,
+        lineCount: 1,
+        sourceLines: [headerSourceLine],
+        sourceControlLines: [lines[headerStart] ?? ''],
+        sourceLayouts: orientedLayouts([{
+          kind: 'financial-item',
+          columns: [
+            { text: labelOf(items.header.item), align: 'left', widthRatio: nameLen / cols },
+            { text: labelOf(items.header.quantity), align: 'left', widthRatio: 4 / cols },
+            { text: labelOf(items.header.amount), align: 'right', widthRatio: amtLen / cols },
+          ],
+        }]),
+      });
+    }
 
     for (const [rowIndex, row] of items.rows.entries()) {
       const rowStart = lines.length;
@@ -314,7 +340,7 @@ export function renderBillDocumentToCompactLines(
       }
       if (options.rasterGroups && lines.length > rowStart) {
         const group = { groupId: `item-table-row-${rowIndex}`, lineIndex: rowStart, lineCount: lines.length - rowStart };
-        options.rasterGroups.push({ ...group, sourceLines, sourceControlLines, sourceLayouts, financialSourceLines, financial: true });
+        options.rasterGroups.push({ ...group, sourceLines, sourceControlLines, sourceLayouts: orientedLayouts(sourceLayouts), financialSourceLines, financial: true });
       }
     }
   }

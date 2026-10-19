@@ -44,7 +44,7 @@ const { getJWTSecret } = require('../main/routes/auth');
 const { authRoutes } = require('../main/routes/auth');
 const { databaseToolsRoutes } = require('../main/routes/database-tools');
 const { databaseRoutes } = require('../main/routes/database');
-const { verifyMasterPin, isMasterPinSet } = require('../main/services/master-pin');
+const { verifyMasterPin, isMasterPinSet, resetMasterPin } = require('../main/services/master-pin');
 const { cancelHttpShutdownWork, closeHttpServer, installHttpShutdownTracking } = require('../main/shutdown');
 
 let passed = 0;
@@ -870,6 +870,52 @@ async function runTests() {
       data: { schema_version: String(currentVersion), data: emptyPayload },
     });
     assert(matchingOverwriteNoPin.status === 403, `matching-schema overwrite import without a PIN is still rejected (got ${matchingOverwriteNoPin.status})`);
+  }
+
+  // ── SEC-01 regression: master-pin reset requires owner re-authentication ──
+  // Placed before Test 4 because that test wipes the database. A valid owner
+  // JWT alone must never be able to overwrite the master PIN that gates every
+  // destructive operation.
+  console.log('\nSEC-01: master-pin reset requires owner re-authentication');
+  {
+    const bcrypt = require('bcryptjs');
+    db.prepare("UPDATE users SET password = ? WHERE id = 'owner-1'").run(bcrypt.hashSync('OwnerPass123', 10));
+
+    const noPassword = await request(app).post('/api/db-tools/master-pin/reset')
+      .set('Authorization', `Bearer ${ownerToken}`).send({ pin: '9999', confirm_pin: '9999' });
+    assertEqual(noPassword.status, 400, 'master-pin reset without a password is rejected');
+    assert(!verifyMasterPin('9999'), 'master PIN unchanged after a rejected request');
+
+    const wrongPassword = await request(app).post('/api/db-tools/master-pin/reset')
+      .set('Authorization', `Bearer ${ownerToken}`).send({ pin: '8888', confirm_pin: '8888', password: 'WrongPass123' });
+    assertEqual(wrongPassword.status, 400, 'master-pin reset with a wrong password is rejected');
+    assert(!verifyMasterPin('8888'), 'master PIN unchanged after a wrong password');
+
+    const notOwner = await request(app).post('/api/db-tools/master-pin/reset')
+      .set('Authorization', `Bearer ${cashierToken}`).send({ pin: '7777', confirm_pin: '7777', password: 'OwnerPass123' });
+    assertEqual(notOwner.status, 403, 'master-pin reset by a non-owner is rejected');
+
+    const ok = await request(app).post('/api/db-tools/master-pin/reset')
+      .set('Authorization', `Bearer ${ownerToken}`).send({ pin: '4321', confirm_pin: '4321', password: 'OwnerPass123' });
+    assertEqual(ok.status, 200, 'master-pin reset succeeds with a valid password');
+    assert(verifyMasterPin('4321'), 'the new master PIN verifies after a re-authenticated reset');
+    assert(!verifyMasterPin('1234'), 'the previous master PIN no longer verifies');
+
+    // Restore the PIN the later tests expect, so this regression block is inert
+    // for everything that runs after it.
+    resetMasterPin('1234');
+    assert(verifyMasterPin('1234'), 'master PIN restored for subsequent tests');
+
+    // Rate-limit policy: repeated attempts on this auth surface are throttled
+    // (authRateLimit, 10/15 min per IP) even though every attempt above was
+    // rejected before reaching the PIN check.
+    let throttled = 0;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const rejected = await request(app).post('/api/db-tools/master-pin/reset')
+        .set('Authorization', `Bearer ${ownerToken}`).send({ pin: '4321', confirm_pin: '4321', password: 'WrongPass123' });
+      if (rejected.status === 429) throttled++;
+    }
+    assert(throttled > 0, `repeated attempts are rate-limited (throttled ${throttled}/10 responses with 429)`);
   }
 
   // ── Test 4: POST /db-tools/initialize ────────────────────────────────────

@@ -615,12 +615,26 @@ async function testStandaloneDevServerShutdown(): Promise<void> {
   }
 }
 
-async function testStartupEntrypoint(startupRace = false, startupFailureRace = false): Promise<void> {
-  const childEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
+interface StartupChildResult {
+  passed: boolean;
+  events: string[];
+  exitCodes: number[];
+  dialogs: { title: string; body: string }[];
+  telemetryEvents: { name: string; payload: Record<string, unknown> }[];
+}
+
+async function testStartupEntrypoint(
+  startupRace = false,
+  startupFailureRace = false,
+  options: { extraEnv?: Record<string, string>; expectBlockedDialog?: boolean } = {},
+): Promise<StartupChildResult> {
+  const childEnv: Record<string, string | undefined> = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
   if (startupRace) childEnv.FLO_STARTUP_RACE = '1';
   else delete childEnv.FLO_STARTUP_RACE;
   if (startupFailureRace) childEnv.FLO_STARTUP_FAILURE_RACE = '1';
   else delete childEnv.FLO_STARTUP_FAILURE_RACE;
+  delete childEnv.FLO_STARTUP_CONVERGENCE_BLOCK;
+  Object.assign(childEnv, options.extraEnv ?? {});
   const child = spawn(process.execPath, [
     require.resolve('ts-node/dist/bin.js'),
     '--transpile-only',
@@ -650,7 +664,46 @@ async function testStartupEntrypoint(startupRace = false, startupFailureRace = f
   assert.equal(signal, null, `startup-failure child exited by signal: ${output}`);
   assert.equal(code, 0, `${startupFailureRace ? 'startup failure race' : startupRace ? 'startup cancellation' : 'startup failure'} entrypoint coverage failed: ${output}`);
   const resultLine = output.trim().split('\n').at(-1) || '';
-  assert.equal(JSON.parse(resultLine).passed, true, output);
+  const result = JSON.parse(resultLine) as StartupChildResult;
+  assert.equal(result.passed, true, output);
+
+  // The dialog content is what an operator actually reads, so assert the real
+  // message the startup path renders for both a blocked migration and an
+  // unrelated failure.
+  if (!startupRace && !startupFailureRace) {
+    const dialog = result.dialogs.at(-1);
+    assert(dialog, `startup failure rendered no native dialog: ${output}`);
+    const failedEvent = result.telemetryEvents.at(-1);
+    assert.equal(failedEvent?.name, 'startup_failed', `startup failure reported no telemetry event: ${output}`);
+
+    if (options.expectBlockedDialog) {
+      assert.match(dialog.body, /Blocked upgrade: v1001 \(catch_up_upstream_v93_to_v98\)/,
+        'the blocked-upgrade dialog names the blocked migration');
+      assert.match(dialog.body, /\[column\] role_permission_overrides\.effect: column missing/,
+        'the blocked-upgrade dialog names the affected column');
+      assert.match(dialog.body, /\[index\] local_diagnostics\.idx_local_diagnostics_created: index missing/,
+        'the blocked-upgrade dialog names the affected index');
+      assert.match(dialog.body, /Keep the automatic pre-upgrade backup/,
+        'the blocked-upgrade dialog states the safe next step');
+      assert.doesNotMatch(dialog.body, /\b(INSERT|SELECT|UPDATE|DELETE)\b/,
+        'the blocked-upgrade dialog exposes no SQL');
+      assert.equal(failedEvent?.payload.error_code, 'MIGRATION_CONVERGENCE_BLOCKED',
+        'telemetry carries the stable blocked-migration code');
+      assert.equal(failedEvent?.payload.migration_version, 1001, 'telemetry carries the blocked migration version');
+      assert.equal(failedEvent?.payload.migration_name, 'catch_up_upstream_v93_to_v98', 'telemetry carries the blocked migration name');
+      assert.equal(failedEvent?.payload.blocked_object_count, 2, 'telemetry carries the blocked object count');
+      assert.equal(failedEvent?.payload.blocked_objects, 'column:role_permission_overrides.effect, index:local_diagnostics.idx_local_diagnostics_created',
+        'telemetry carries the blocked objects by type');
+    } else {
+      assert.equal(dialog.title, 'Initialization Error', 'unrelated startup failures keep the original dialog title');
+      assert.equal(dialog.body, 'Failed to start Flo: Error: simulated startup failure',
+        'unrelated startup failures keep the original dialog body');
+      assert.equal(failedEvent?.payload.error_code, undefined, 'unrelated startup failures report no blocked-migration code');
+      assert.equal(failedEvent?.payload.migration_version, undefined, 'unrelated startup failures report no migration version');
+    }
+  }
+
+  return result;
 }
 
 async function testOwnedServerStopEntrypoints(): Promise<void> {
@@ -1248,6 +1301,10 @@ async function testQuitAndInstallCleanupOrdering(): Promise<void> {
   await testStartupEntrypoint();
   await testStartupEntrypoint(true);
   await testStartupEntrypoint(false, true);
+  await testStartupEntrypoint(false, false, {
+    extraEnv: { FLO_STARTUP_CONVERGENCE_BLOCK: '1' },
+    expectBlockedDialog: true,
+  });
   await testStandaloneDevServerShutdown();
   await testStandaloneStartupCancellation();
   await testDatabaseImportShutdownCancellation();

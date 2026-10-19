@@ -8,7 +8,17 @@ const originalLoad = Module._load;
 const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'flo-cloud-deletion-'));
 Module._load = function (request: string, parent: unknown, isMain: boolean) {
   if (request === 'electron') {
-    return { app: { isPackaged: true, getPath: () => testDir, getVersion: () => 'test' } };
+    // Mirror the Electron runtime surface: safeStorage is always present and
+    // backs the flosec1 envelope used for the cloud API key (SEC-02).
+    return {
+      app: { isPackaged: true, getPath: () => testDir, getVersion: () => 'test' },
+      safeStorage: {
+        isEncryptionAvailable: () => true,
+        getSelectedStorageBackend: () => 'keychain',
+        encryptString: (value: string) => Buffer.from(value, 'utf8'),
+        decryptString: (value: Buffer) => value.toString('utf8'),
+      },
+    };
   }
   return originalLoad.apply(this, arguments as any);
 };

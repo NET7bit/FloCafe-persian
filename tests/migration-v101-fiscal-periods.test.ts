@@ -21,7 +21,8 @@ Module._load = function (request: string, parent: unknown, isMain: boolean) {
 const { MIGRATIONS } = require('../main/db');
 
 const TARGET_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version;
-const target = MIGRATIONS.find((m: any) => m.version === TARGET_VERSION);
+// Locate by name (not version) so the lookup survives migration renumbering.
+const target = MIGRATIONS.find((m: any) => m.name === 'add_fiscal_periods');
 
 function assert(condition: unknown, message: string): void {
   if (!condition) {

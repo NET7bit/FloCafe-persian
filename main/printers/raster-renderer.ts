@@ -156,17 +156,27 @@ export function rasterRendererHtml(): string {
       // font and bidi direction before painting the final pixels.
       context.font = weight + ' ' + fontSize + 'px ' + fontSpec;
       context.textBaseline = 'top';
-      context.direction = request.direction;
+      // An explicit layout direction carries the document's base direction and
+      // wins over the per-line content probe.
+      const layoutDirection = request.layout?.direction ?? request.direction;
+      context.direction = layoutDirection;
       context.textAlign = request.align === 'center' ? 'center' : 'left';
       context.setTransform(scaleX, 0, 0, scaleY, 0, 0);
       context.fillStyle = '#fff';
       context.fillRect(0, 0, width, canvas.height);
       context.fillStyle = '#000';
+      // RTL documents mirror the column order so the first logical column (the
+      // item name) sits at the reading start, on the right; LTR is untouched.
+      const mirrored = request.layout !== undefined && layoutDirection === 'rtl';
       renderLines.forEach((line, lineIndex) => {
         let x = 0;
         line.forEach((cell, cellIndex) => {
-          context.textAlign = cell.align === 'center' ? 'center' : cell.align;
-          const cellX = cell.align === 'right' ? x + cell.width : cell.align === 'center' ? x + cell.width / 2 : x;
+          const align = mirrored
+            ? (cell.align === 'left' ? 'right' : cell.align === 'right' ? 'left' : 'center')
+            : cell.align;
+          const cellStart = mirrored ? width - x - cell.width : x;
+          context.textAlign = align === 'center' ? 'center' : align;
+          const cellX = align === 'right' ? cellStart + cell.width : align === 'center' ? cellStart + cell.width / 2 : cellStart;
           context.fillText(cell.text, cellX / scaleX, lineIndex * logicalLineHeight + topPad);
           x += cell.width;
           if (cellIndex < line.length - 1) x += gapDots;
@@ -553,7 +563,7 @@ function requestForRasterLine(
     text,
     widthDots: capabilities.raster.widthDots,
     maxBandHeight: capabilities.raster.maxBandHeight,
-    direction: /[\u0590-\u08FF\uFB50-\uFEFF]/.test(text) ? 'rtl' : 'ltr',
+    direction: layout?.direction ?? (/[\u0590-\u08FF\uFB50-\uFEFF]/.test(text) ? 'rtl' : 'ltr'),
     align: metadataLine.includes('{CENTER}') && metadataLine.includes('{/CENTER}') ? 'center' : 'left',
     ...(layout ? { layout } : {}),
     style: metadataLine.includes('{DOUBLE_HEIGHT}') ? 'double-height'
@@ -662,7 +672,9 @@ export async function renderUnsupportedRasterLines(
           const layoutFinancial = physicalSourceLine.sourceIndex === undefined
             ? financial
             : range.financialSourceLines?.[physicalSourceLine.sourceIndex] ?? financial;
-          const layout = sourceText !== undefined && layoutFinancial
+          // A supplied layout is presentation: label rows (such as the item table
+          // header) get the same columns as the money lines they label.
+          const layout = sourceText !== undefined
             ? range.sourceLayouts?.[physicalSourceLine.sourceIndex!]
             : undefined;
           const request = requestForRasterLine(physicalSourceLine.controlLine, physicalSourceLine.lineIndex, capabilities, requestPrefix, layoutFinancial, sourceText, layout);

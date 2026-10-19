@@ -130,11 +130,13 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
 
   # 4b. Linux Core Test Suite (sharded)
-  # `npm test` runs ~90 suites serially (~3.5 min) and dominated the PR critical
-  # path. Run the same suites as two round-robin shards on separate runners —
-  # they run in parallel with the build/lint job above, cutting merge-ready time
-  # instead of just the job's own wall time. Shards MUST be separate runners:
-  # several auth suites interfere when run concurrently on one machine.
+  # The `npm test` orchestrator runs the full manifest (199 suites) serially and
+  # dominated the PR critical path. Run the same suites as two round-robin
+  # shards on separate runners — they run in parallel with the build/lint job
+  # above, cutting merge-ready time instead of just the job's own wall time.
+  # Shards MUST be separate runners: several auth suites interfere when run
+  # concurrently on one machine. Both shards read the canonical suite manifest
+  # (scripts/ci/test-suites.json), so shard coverage cannot drift.
   linux-tests:
     name: Core Test Suite (Shard ${{ matrix.shard_number }}/2)
     needs: changes
@@ -330,9 +332,15 @@ jobs:
   # 7. Required Checks Gate
   # Always report a conclusion so path-filtered skips can satisfy the ruleset's
   # required check without hiding actual job failures.
+  # Semantics: every job that can fail for a PR must be listed in `needs`.
+  # `skipped` is only accepted when the job itself was filtered out (e.g. a
+  # push event skips dependency-review; a docs-only change skips the test
+  # shards); the `changes` job must always succeed because its outputs decide
+  # those skips. A red required job therefore always reddens this gate.
+  # tests/ci-required-checks.test.cjs pins this list; update both together.
   required-checks-gate:
     name: Required Checks Gate
-    needs: [changes, linux-baseline, e2e-playwright, windows-uninstaller]
+    needs: [changes, dependency-review, linux-baseline, linux-tests, tax-category-invariant, e2e-playwright, native-e2e-playwright, windows-uninstaller]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -343,7 +351,7 @@ jobs:
             echo "::error::Path Filtering did not succeed (status: ${{ needs.changes.result }}); its dependents' skipped status cannot be trusted."
             exit 1
           fi
-          for result in "${{ needs.linux-baseline.result }}" "${{ needs.e2e-playwright.result }}" "${{ needs.windows-uninstaller.result }}"; do
+          for result in "${{ needs.dependency-review.result }}" "${{ needs.linux-baseline.result }}" "${{ needs.linux-tests.result }}" "${{ needs.tax-category-invariant.result }}" "${{ needs.e2e-playwright.result }}" "${{ needs.native-e2e-playwright.result }}" "${{ needs.windows-uninstaller.result }}"; do
             if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
               echo "::error::A required job did not succeed (status: $result)."
               exit 1

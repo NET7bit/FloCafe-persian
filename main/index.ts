@@ -5,6 +5,8 @@ import * as os from 'os';
 
 import { Bonjour } from 'bonjour-service';
 import { getDatabase, initDatabase, closeDatabase, waitForDatabaseRequests, beginDatabaseShutdown, SchemaVersionMismatchError, now, withDatabaseRequest } from './db';
+import { describeStartupFailure, startupFailureTelemetryFields } from './startup-failure';
+import { runStartupRestoreFlow } from './startup-restore';
 import { BETA_CHANNEL_SETTING_KEY, parseStoredBetaChannelEnabled, resolveUpdateChannel } from './update-channel';
 import { computeTaxPackUpdates, fetchRemoteTaxPackCatalog } from './tax-packs/catalog';
 import { startServer, stopServer, getLocalIP, isServerRunning, getServerPort } from './server';
@@ -1173,12 +1175,31 @@ function showAbout(): void {
 async function initialize(): Promise<void> {
   runtimeState = 'starting';
   log.info('[Lifecycle] Runtime is starting');
+  // Set when the blocked-migration flow already explained the state to the
+  // operator, so the generic startup error box below does not repeat it.
+  let startupRestoreDialogPresented = false;
   try {
     if (isShutdownRequested()) return;
     console.log('[Flo] Initializing...');
 
     console.log('[Flo] Initializing database...');
-    initDatabase();
+    try {
+      initDatabase();
+    } catch (startupDbError) {
+      // Only a recognized blocked migration can offer a restore; every other
+      // failure returns 'not-offered' and is rethrown untouched.
+      const restoreOutcome = await runStartupRestoreFlow({ error: startupDbError });
+      startupRestoreDialogPresented = restoreOutcome === 'unchanged' || restoreOutcome === 'failed';
+      if (restoreOutcome !== 'restored') throw startupDbError;
+      // Deliberately exactly one retry, through the real initialization path, so
+      // migrations, the user_version gate and integrity checks all run again.
+      // A second failure escapes to the outer handler and cannot loop back here.
+      console.log('[Flo] Backup restored; re-running database initialization...');
+      // performStartupRestore already opened the restored database; close it so
+      // the retry is a real initialization rather than a second live handle.
+      closeDatabase();
+      initDatabase();
+    }
     if (isShutdownRequested()) return;
 
     console.log('[Flo] Starting local server...');
@@ -1343,7 +1364,10 @@ async function initialize(): Promise<void> {
       }
       return;
     }
-    dialog.showErrorBox('Initialization Error', `Failed to start Flo: ${error}`);
+    if (!startupRestoreDialogPresented) {
+      const startupDialog = describeStartupFailure(error);
+      dialog.showErrorBox(startupDialog.title, startupDialog.body);
+    }
 
     // Report fatal startup error to telemetry on a best-effort basis.
     try {
@@ -1354,6 +1378,7 @@ async function initialize(): Promise<void> {
         payload.db_schema_version = error.dbVersion;
         payload.app_schema_version = error.appVersion;
       }
+      Object.assign(payload, startupFailureTelemetryFields(error));
       await sendTelemetryEvent('startup_failed', payload);
     } catch (telemetryError) {
       console.error('[Flo] Failed to report startup error via telemetry:', telemetryError);

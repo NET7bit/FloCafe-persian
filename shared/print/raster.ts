@@ -19,6 +19,8 @@ export type RasterLayoutKind = 'financial-summary' | 'financial-item';
 
 export interface RasterTextLayout {
   readonly kind: RasterLayoutKind;
+  /** Document base direction; overrides the per-line content probe and mirrors the columns when `rtl`. */
+  readonly direction?: RasterTextDirection;
   readonly columns: readonly {
     readonly text: string;
     readonly align: 'left' | 'right';
@@ -262,6 +264,7 @@ export function isRasterRenderRequest(value: unknown): value is RasterRenderRequ
     && (request.layout === undefined || (
       !!request.layout
       && (request.layout.kind === 'financial-summary' || request.layout.kind === 'financial-item')
+      && (request.layout.direction === undefined || request.layout.direction === 'ltr' || request.layout.direction === 'rtl')
       && Array.isArray(request.layout.columns)
       && request.layout.columns.length >= 2
       && request.layout.columns.length <= 3

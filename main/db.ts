@@ -13,11 +13,25 @@ import { resolveContainedPath } from './lib/path-containment';
 import { serializeMerchantTemplatePayload, validateMerchantTemplateText } from '../shared/print';
 import { ROLE_KEYS } from '../shared/role-permissions';
 import { getCurrencyFractionDigits, resolveRegionalSnapshot } from './countries';
+import { MigrationConvergenceError } from './migration-diagnostics';
+import type { MigrationConvergenceProblem } from './migration-diagnostics';
+
+export { MigrationConvergenceError } from './migration-diagnostics';
+export type { MigrationConvergenceProblem, MigrationProblemObjectType, MigrationConvergenceDiagnostic } from './migration-diagnostics';
 
 const USER_ROLE_SQL_CHECK = `CHECK (role IN (${ROLE_KEYS.map((role) => `'${role}'`).join(', ')}))`;
 
 let db: Database.Database;
-let dbHealthError: string | null = null;
+// Runtime database health, split into two independently verified components:
+// - integrity: result of the startup `PRAGMA integrity_check`.
+// - foreignKeys: enforcement state of `PRAGMA foreign_keys` on the live
+//   singleton connection, confirmed by read-back. 'ok' is recorded only after
+//   a read-back of exactly 1; 'error' means enforcement could not be confirmed
+//   on an open connection; 'unknown' means it could not be determined at all.
+// A component is absent only after it has been independently verified healthy,
+// and recovering one component never clears the other.
+type FkEnforcementState = 'ok' | 'error' | 'unknown';
+let dbHealthState: { integrity?: string; foreignKeys?: FkEnforcementState } = {};
 
 // Database backup, restore, and wipe operations must not overlap. The lock is
 // a FIFO promise chain so a rejected operation cannot strand later work.
@@ -147,13 +161,24 @@ function waitForActiveDatabaseRequests(signal: AbortSignal, timeoutMs?: number):
   });
 }
 
-export function withDatabaseRequest<T>(operation: () => T | Promise<T>, signal?: AbortSignal): Promise<T> {
+export interface DatabaseRequestOptions {
+  /** Verify FK enforcement at execution time (after dequeue), not at enqueue. */
+  fkSensitive?: boolean;
+}
+
+export function withDatabaseRequest<T>(operation: () => T | Promise<T>, signal?: AbortSignal, options?: DatabaseRequestOptions): Promise<T> {
   if (databaseShutdownRequested || signal?.aborted) return Promise.reject(createDatabaseShutdownError());
   const run = (): Promise<T> => {
     // Reserve the request synchronously. A maintenance lock scheduled in the
     // same turn must observe this request before it starts replacing the DB.
     activeDatabaseRequests += 1;
-    return Promise.resolve().then(operation).finally(() => {
+    return Promise.resolve().then(() => {
+      // Execution-time check: a request queued during maintenance re-verifies
+      // FK enforcement state when it actually runs, so a degraded state that
+      // survives maintenance cannot be bypassed by a dequeued request.
+      if (options?.fkSensitive) assertFkEnforcementForWrite();
+      return operation();
+    }).finally(() => {
       activeDatabaseRequests = Math.max(0, activeDatabaseRequests - 1);
       releaseMaintenanceDrainWaiters();
       releaseMaintenanceRequestWaiters();
@@ -237,6 +262,17 @@ export function databaseMaintenanceMiddleware(req: Request, res: Response, next:
   // Maintenance route handlers acquire the FIFO lock themselves; exclude from active count.
   if (isDatabaseMaintenanceRoute(req)) {
     next();
+    return;
+  }
+
+  // FK degraded-state gate: block FK-sensitive write requests unless FK
+  // enforcement is verified OK. Maintenance/recovery routes are exempt above;
+  // during an active lock all other /api requests were already rejected.
+  if (isFkSensitiveWriteRequest(req) && isFkEnforcementDegraded()) {
+    res.status(503).json({
+      error: 'Database foreign-key enforcement is degraded; FK-sensitive write operations are temporarily unavailable',
+      foreignKeys: dbHealthState.foreignKeys ?? 'unknown',
+    });
     return;
   }
 
@@ -397,10 +433,164 @@ function insertSettingIfMissing(key: string, value: string): void {
     .run(key, value, now());
 }
 
-export function getDbHealth(): { ok: boolean; error?: string } {
-  if (!db) return { ok: false, error: 'Database not initialized' };
-  if (dbHealthError) return { ok: false, error: dbHealthError };
-  return { ok: true };
+export function getDbHealth(): { ok: boolean; error?: string; foreignKeys?: FkEnforcementState } {
+  const foreignKeys = dbHealthState.foreignKeys ?? 'unknown';
+  if (!db) return { ok: false, error: 'Database not initialized', foreignKeys };
+  if (dbHealthState.integrity) return { ok: false, error: dbHealthState.integrity, foreignKeys };
+  if (foreignKeys !== 'ok') {
+    return {
+      ok: false,
+      error: foreignKeys === 'unknown'
+        ? 'Foreign-key enforcement state is unverified'
+        : 'Foreign-key enforcement is not active on the database connection',
+      foreignKeys,
+    };
+  }
+  return { ok: true, foreignKeys };
+}
+
+/** Best-effort diagnostic log; never lets a logging failure escape its caller. */
+function logFkHealthIssue(message: string, error?: unknown): void {
+  try {
+    if (error === undefined) console.error(message);
+    else console.error(message, error);
+  } catch { /* diagnostics must never escape */ }
+}
+
+/**
+ * Re-establishes and verifies foreign-key enforcement on the live singleton
+ * connection and records the outcome in the FK health component. Never throws.
+ *
+ * Success requires a read-back of `PRAGMA foreign_keys` equal to 1 — never the
+ * mere absence of an exception from the enabling statement. Performs at most
+ * one immediate, wait-free re-enable attempt: no retry loop, sleep, timer, or
+ * blocking backoff. Never closes, disposes, or reopens the singleton, and
+ * never touches the integrity component.
+ */
+export function recoverForeignKeyEnforcement(): void {
+  try {
+    const connection = getDatabase();
+    if (!connection.open) {
+      dbHealthState.foreignKeys = 'unknown';
+      logFkHealthIssue('[DB FK] Recovery skipped: the database connection is not open');
+      return;
+    }
+    if (Number(connection.pragma('foreign_keys', { simple: true })) === 1) {
+      dbHealthState.foreignKeys = 'ok';
+      return;
+    }
+    connection.pragma('foreign_keys = ON');
+    if (Number(connection.pragma('foreign_keys', { simple: true })) === 1) {
+      dbHealthState.foreignKeys = 'ok';
+    } else {
+      dbHealthState.foreignKeys = 'error';
+      logFkHealthIssue('[DB FK] Recovery failed: foreign_keys read-back is still not 1 after re-enable');
+    }
+  } catch (error: unknown) {
+    dbHealthState.foreignKeys = 'unknown';
+    logFkHealthIssue('[DB FK] Recovery failed with exception:', error);
+  }
+}
+
+/**
+ * Verifies foreign-key enforcement on the just-opened singleton and records
+ * the FK health component. Used by the open/startup lifecycle, where a fresh
+ * connection has been created and migrations have finished. Never throws.
+ */
+function verifyForeignKeyEnforcementOnOpen(): void {
+  try {
+    if (Number(db.pragma('foreign_keys', { simple: true })) === 1) {
+      dbHealthState.foreignKeys = 'ok';
+    } else {
+      dbHealthState.foreignKeys = 'error';
+      logFkHealthIssue('[DB] foreign_keys read-back after open is not 1');
+    }
+  } catch (error: unknown) {
+    dbHealthState.foreignKeys = 'unknown';
+    logFkHealthIssue('[DB] foreign_keys verification after open failed:', error);
+  }
+}
+
+// ─── FK degraded-state write gate (P-3.8D.1) ────────────────────────────────
+// Blocks normal FK-sensitive write operations while foreign-key enforcement
+// is not verified OK. Read-only operations, health/diagnostics and the
+// designated recovery paths (which run inside the maintenance lock and are
+// exempt from this gate) are never blocked. The gate reads the verified FK
+// enforcement state only — never the maintenance-lock boolean — so a degraded
+// state that survives maintenance keeps the gate closed. No public bypass
+// API exists: FK can return to 'ok' only via recoverForeignKeyEnforcement()
+// or verifyForeignKeyEnforcementOnOpen(), both read-back verified.
+
+export class DatabaseFkDegradedError extends Error {
+  readonly code = 'ERR_FK_DEGRADED';
+  readonly foreignKeys: FkEnforcementState;
+  constructor(foreignKeys: FkEnforcementState) {
+    super('Database foreign-key enforcement is degraded; FK-sensitive write operations are temporarily unavailable');
+    this.foreignKeys = foreignKeys;
+  }
+}
+
+/** FK enforcement counts as healthy only after a verified read-back of 1. */
+export function isFkEnforcementDegraded(): boolean {
+  return dbHealthState.foreignKeys !== 'ok';
+}
+
+/** Throws DatabaseFkDegradedError unless FK enforcement is verified OK. */
+export function assertFkEnforcementForWrite(): void {
+  if (isFkEnforcementDegraded()) {
+    throw new DatabaseFkDegradedError(dbHealthState.foreignKeys ?? 'unknown');
+  }
+}
+
+// Write-route families whose operations touch FK-sensitive tables (child rows,
+// FK columns, or parent tables whose cascades matter), classified per family
+// with affected-table evidence from the P-3.8D.0 audit. FK-safe families are
+// listed separately; unclassified write methods fail closed.
+const FK_SENSITIVE_WRITE_PREFIXES = [
+  '/api/orders', '/api/bills', '/api/products', '/api/categories',
+  '/api/addon-groups', '/api/customers', '/api/staff', '/api/kitchen-stations',
+  '/api/tables', '/api/recipes', '/api/purchase-invoices', '/api/purchase-returns',
+  '/api/supplier-payments', '/api/receivables', '/api/expenses', '/api/accounting',
+  '/api/refunds', '/api/cash-closures', '/api/cash-sessions', '/api/held-orders',
+  '/api/order-items', '/api/kds', '/api/payment-methods', '/api/printers',
+  '/api/fiscal-periods', '/api/menu-csv', '/api/whatsapp/send',
+  '/api/whatsapp/inbox', '/api/auth/setup', '/api/db-tools/master-pin',
+];
+
+// Write families verified FK-safe (the route is actually limited to these
+// tables): settings; tax tables; diagnostics/support outboxes; additive
+// schema DDL; whatsapp settings/connection/blocklist; backup-file management.
+// P-3.8D.1.2 additions, each verified against its real implementation:
+//   /api/auth/login, /api/auth/refresh, /api/auth/tenants/select — read-only
+//     (SELECT users + JWT issuance; no INSERT/UPDATE/DELETE in the handlers).
+//   /api/auth/logout — revokes the caller's own token, writing only the
+//     verified FK-free revoked_tokens table (middleware/security.ts:218).
+//   /api/tax/preview — read-only computation (SELECT settings/customers).
+//   /api/mobile/rotate-code — writes only settings (mobile_pairing_code*),
+//     a verified FK-free table.
+// Exact leaf paths are used so a future sibling route is not silently covered.
+const FK_SAFE_WRITE_PREFIXES = [
+  '/api/settings', '/api/tax-packs', '/api/diagnostics', '/api/support-ticket',
+  '/api/print-templates', '/api/db-tools/apply-safe-fixes',
+  '/api/db-tools/backups', '/api/whatsapp',
+  '/api/auth/login', '/api/auth/logout', '/api/auth/refresh',
+  '/api/auth/tenants/select', '/api/tax/preview', '/api/mobile/rotate-code',
+];
+
+function matchesRoutePrefix(fullPath: string, prefixes: string[]): boolean {
+  return prefixes.some((prefix) => fullPath === prefix || fullPath.startsWith(`${prefix}/`));
+}
+
+/** Whether a request performs an FK-sensitive write that the gate must block. */
+export function isFkSensitiveWriteRequest(req: Request): boolean {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return false;
+  const fullPath = (req.baseUrl || '') + req.path;
+  // Sensitive prefixes are checked first so specific paths (whatsapp/send)
+  // are not swallowed by a broader safe prefix (/api/whatsapp).
+  if (matchesRoutePrefix(fullPath, FK_SENSITIVE_WRITE_PREFIXES)) return true;
+  if (matchesRoutePrefix(fullPath, FK_SAFE_WRITE_PREFIXES)) return false;
+  // Unclassified write methods fail closed.
+  return true;
 }
 
 export function getDbPath(): string {
@@ -926,6 +1116,9 @@ export function initDatabase(recoverInterruptedReplacement = true, allowDuringSh
     fs.mkdirSync(backupDir, { recursive: true });
   }
   if (recoverInterruptedReplacement) recoverInterruptedDatabaseReplacement(dbPath, backupDir);
+  // Finish or discard a startup restore that was interrupted by a crash before
+  // the database is opened, so the live path is always a whole file.
+  recoverInterruptedStartupRestore(dbPath);
 
   // Startup guard: prevent silent recreation of missing database if previously initialized.
   const isProductionStartup = recoverInterruptedReplacement && app.isPackaged && !process.env.FLO_E2E_DB_PATH;
@@ -934,7 +1127,10 @@ export function initDatabase(recoverInterruptedReplacement = true, allowDuringSh
   }
 
   console.log(`[DB] Opening database at: ${dbPath}`);
-  dbHealthError = null;
+  // A fresh open starts both health components from scratch: integrity is
+  // re-evaluated by runStartupIntegrityCheck() below, and FK enforcement is
+  // explicitly unverified until the read-back after `foreign_keys = ON`.
+  dbHealthState = { foreignKeys: 'unknown' };
   db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
@@ -943,7 +1139,12 @@ export function initDatabase(recoverInterruptedReplacement = true, allowDuringSh
 
   runMigrations();
 
-  db.pragma('foreign_keys = ON');
+  try {
+    db.pragma('foreign_keys = ON');
+  } catch (error: unknown) {
+    logFkHealthIssue('[DB] foreign_keys = ON failed after migrations:', error);
+  }
+  verifyForeignKeyEnforcementOnOpen();
 
   runStartupIntegrityCheck();
   repairSequences();
@@ -1078,9 +1279,12 @@ function runStartupIntegrityCheck(): void {
     if (bad.length > 0) {
       const msg = bad.map((r) => r.integrity_check).join('; ');
       console.error('[DB] ⚠ integrity_check reported issues:', msg);
-      dbHealthError = `Database integrity error: ${msg}`;
+      dbHealthState.integrity = `Database integrity error: ${msg}`;
     } else {
       console.log('[DB] integrity_check: ok');
+      // A successful check clears ONLY the integrity component; FK enforcement
+      // is verified separately and must survive an integrity re-check.
+      delete dbHealthState.integrity;
     }
 
     const fkViolations = db.prepare('PRAGMA foreign_key_check').all() as any[];
@@ -1613,16 +1817,18 @@ function parseCanonicalSchemaVersion(value: unknown): number | null {
 }
 
 function readBackupSchemaVersion(fullPath: string): number | null {
-  let backupDb: Database.Database | undefined;
-  try {
-    backupDb = new Database(fullPath, { readonly: true, fileMustExist: true });
-    const row = backupDb.prepare(`SELECT value FROM _flo_meta WHERE key = 'schema_version'`).get() as { value: string } | undefined;
-    return row ? parseCanonicalSchemaVersion(row.value) : null;
-  } catch {
-    return null;
-  } finally {
-    backupDb?.close();
-  }
+  return inspectWithoutSideEffect(fullPath, () => {
+    let backupDb: Database.Database | undefined;
+    try {
+      backupDb = new Database(fullPath, { readonly: true, fileMustExist: true });
+      const row = backupDb.prepare(`SELECT value FROM _flo_meta WHERE key = 'schema_version'`).get() as { value: string } | undefined;
+      return row ? parseCanonicalSchemaVersion(row.value) : null;
+    } catch {
+      return null;
+    } finally {
+      backupDb?.close();
+    }
+  });
 }
 
 export type BackupMetadata = {
@@ -1726,6 +1932,394 @@ export function isManagedBackupFile(candidatePath: string): boolean {
   }
 }
 
+// ── Startup restore (recovery for a blocked migration) ────────────────────
+// This is a recovery workflow, never a repair one: only whole database files are
+// moved, and the blocked database, the source backup and the emergency copy all
+// survive a failed attempt. The candidate backup must be a managed Flo backup,
+// must not be the live database, and must pass integrity/version/schema checks
+// before it is ever offered to an operator.
+
+// Present in every schema this build has ever shipped, so a legitimate
+// pre-upgrade backup (which predates the ideal schema) still qualifies.
+const STARTUP_RESTORE_CORE_TABLES = ['users', 'settings', 'orders', 'categories', 'products', 'bills'];
+
+export type StartupRestoreCandidate = {
+  fileName: string;
+  path: string;
+  sizeBytes: number;
+  createdAt: string;
+  kind: 'manual' | 'auto';
+  schemaVersion: number;
+};
+
+export type StartupRestoreRejection = { fileName: string; reason: string };
+
+export type StartupRestoreStep = 'staged' | 'checkpoint' | 'closed' | 'emergency' | 'swap' | 'initialize';
+
+/**
+ * Thrown by performStartupRestore(). After a failure the live database has been
+ * rolled back to its pre-attempt bytes whenever the attempt had already touched
+ * it; the message states which recovery artifacts are still on disk.
+ */
+export class StartupRestoreError extends Error {
+  constructor(message: string, readonly restoreAttempted = false) {
+    super(message);
+    this.name = 'StartupRestoreError';
+  }
+}
+
+/**
+ * A readonly open of a WAL-mode file creates empty -wal/-shm sidecars that
+ * SQLite does not remove on close, so inspecting a file would otherwise leave
+ * litter next to every backup (and stale sidecars beside a staged or emergency
+ * copy). Only sidecars this call itself created are removed; anything that
+ * already existed is left untouched.
+ */
+function inspectWithoutSideEffect<T>(filePath: string, read: () => T): T {
+  const created = ['-wal', '-shm']
+    .map((suffix) => `${filePath}${suffix}`)
+    .map((sidecarPath) => ({ sidecarPath, preExisting: pathEntryExists(sidecarPath) }));
+  try {
+    return read();
+  } finally {
+    for (const sidecar of created) {
+      if (sidecar.preExisting) continue;
+      try { fs.rmSync(sidecar.sidecarPath, { force: true }); } catch { /* best effort */ }
+    }
+  }
+}
+
+function inspectRestoreDatabaseFile(filePath: string): { ok: true; schemaVersion: number } | { ok: false; reason: string } {
+  return inspectWithoutSideEffect(filePath, () => readRestoreDatabaseFile(filePath));
+}
+
+function readRestoreDatabaseFile(filePath: string): { ok: true; schemaVersion: number } | { ok: false; reason: string } {
+  let candidate: Database.Database;
+  try {
+    candidate = new Database(filePath, { readonly: true, fileMustExist: true });
+  } catch {
+    return { ok: false, reason: 'the file is not a readable SQLite database' };
+  }
+  try {
+    let integrity: { integrity_check: string }[];
+    try {
+      integrity = candidate.prepare('PRAGMA integrity_check').all() as { integrity_check: string }[];
+    } catch (checkError) {
+      const message = checkError instanceof Error ? checkError.message : String(checkError);
+      return { ok: false, reason: `the file failed PRAGMA integrity_check (${message})` };
+    }
+    if (integrity.length !== 1 || integrity[0].integrity_check !== 'ok') {
+      return { ok: false, reason: 'the file failed PRAGMA integrity_check' };
+    }
+    const schemaVersion = Number(candidate.pragma('user_version', { simple: true }));
+    const tail = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
+    if (!Number.isFinite(schemaVersion) || schemaVersion <= 0) {
+      return { ok: false, reason: 'the file does not report a schema version' };
+    }
+    if (schemaVersion > tail) {
+      return { ok: false, reason: `the file is schema v${schemaVersion}, newer than this build supports (v${tail})` };
+    }
+    let metadataVersion: string | undefined;
+    try {
+      const row = candidate.prepare(`SELECT value FROM _flo_meta WHERE key = 'schema_version'`).get() as { value: string } | undefined;
+      metadataVersion = row?.value;
+    } catch { /* a backup without the metadata table is judged on user_version alone */ }
+    if (metadataVersion !== undefined) {
+      const parsed = parseCanonicalSchemaVersion(metadataVersion);
+      if (parsed === null || parsed === undefined || parsed !== schemaVersion) {
+        return { ok: false, reason: 'the backup metadata does not match its SQLite header' };
+      }
+    }
+    const tables = new Set(getTables(candidate));
+    const missing = STARTUP_RESTORE_CORE_TABLES.filter((table) => !tables.has(table));
+    if (missing.length > 0) {
+      return { ok: false, reason: `the file is missing required table(s): ${missing.join(', ')}` };
+    }
+    return { ok: true, schemaVersion };
+  } catch (error) {
+    return { ok: false, reason: `the file could not be inspected (${error instanceof Error ? error.message : 'unknown error'})` };
+  } finally {
+    try { candidate.close(); } catch { /* already closed */ }
+  }
+}
+
+/** Full eligibility check for a restore source: managed location + file quality. */
+export function validateStartupRestoreCandidate(candidatePath: string): { ok: true; schemaVersion: number } | { ok: false; reason: string } {
+  if (typeof candidatePath !== 'string' || !candidatePath) return { ok: false, reason: 'no backup path was provided' };
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(candidatePath);
+  } catch {
+    return { ok: false, reason: 'the backup file no longer exists or cannot be read' };
+  }
+  if (stat.isSymbolicLink()) return { ok: false, reason: 'the backup file is a symbolic link' };
+  if (!stat.isFile()) return { ok: false, reason: 'the backup is not a regular file' };
+  if (!isManagedBackupFile(candidatePath)) return { ok: false, reason: 'the file is not a Flo-managed backup' };
+  const dbPath = getDbPath();
+  for (const suffix of ['', '-wal', '-shm']) {
+    if (isLiveDatabaseTarget(candidatePath, `${dbPath}${suffix}`)) {
+      return { ok: false, reason: 'the file is the active database, not a backup' };
+    }
+  }
+  return inspectRestoreDatabaseFile(candidatePath);
+}
+
+/** Managed backups split into those safe to offer and those rejected, with why. */
+export function discoverStartupRestoreBackups(): {
+  usable: StartupRestoreCandidate[];
+  rejected: StartupRestoreRejection[];
+} {
+  const usable: StartupRestoreCandidate[] = [];
+  const rejected: StartupRestoreRejection[] = [];
+  for (const entry of listBackups()) {
+    const verdict = validateStartupRestoreCandidate(entry.path);
+    if (verdict.ok === true) {
+      usable.push({
+        fileName: entry.fileName,
+        path: entry.path,
+        sizeBytes: entry.sizeBytes,
+        createdAt: entry.createdAt,
+        kind: entry.kind,
+        schemaVersion: verdict.schemaVersion,
+      });
+    } else {
+      rejected.push({ fileName: entry.fileName, reason: verdict.reason });
+    }
+  }
+  return { usable, rejected };
+}
+
+/** Filename, real timestamp, schema version and size — everything an operator needs to tell backups apart. */
+export function describeStartupRestoreCandidate(candidate: StartupRestoreCandidate): string {
+  const stamp = new Date(candidate.createdAt);
+  const readable = Number.isNaN(stamp.getTime())
+    ? candidate.createdAt
+    : `${stamp.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '')} UTC`;
+  return `${candidate.fileName}\n   ${readable} · schema v${candidate.schemaVersion} · ${Math.max(1, Math.round(candidate.sizeBytes / 1024))} KB`;
+}
+
+type StartupRestoreJournal = {
+  phase: 'prepared' | 'swapped' | 'committed';
+  dbPath: string;
+  stagedPath: string;
+  emergencyPath: string;
+};
+
+// Deliberately outside the managed `flo-backup-*.db` scheme so an emergency copy
+// is never listed, offered or pruned as a known-good pre-upgrade backup.
+function startupRestoreEmergencyPath(dbPath: string, unique: string): string {
+  return path.join(path.resolve(dbPath), '..', `startup-restore-emergency-${unique}.db`);
+}
+
+function startupRestoreStagedPath(dbPath: string, unique: string): string {
+  return path.join(path.dirname(path.resolve(dbPath)), `.startup-restore-staged-${unique}`);
+}
+
+function startupRestoreJournalPath(dbPath: string): string {
+  return path.join(path.dirname(path.resolve(dbPath)), `.startup-restore-journal-${path.basename(dbPath)}.json`);
+}
+
+function writeStartupRestoreJournal(journalPath: string, journal: StartupRestoreJournal): void {
+  const tempPath = `${journalPath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(journal), { encoding: 'utf8', mode: 0o600 });
+  syncFile(tempPath);
+  fs.renameSync(tempPath, journalPath);
+  syncDirectory(path.dirname(journalPath));
+}
+
+function readStartupRestoreJournal(journalPath: string): StartupRestoreJournal | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(journalPath, 'utf8')) as Partial<StartupRestoreJournal>;
+    if ((parsed.phase !== 'prepared' && parsed.phase !== 'swapped' && parsed.phase !== 'committed')
+      || typeof parsed.dbPath !== 'string' || !path.isAbsolute(parsed.dbPath)
+      || typeof parsed.stagedPath !== 'string' || !path.isAbsolute(parsed.stagedPath)
+      || typeof parsed.emergencyPath !== 'string' || !path.isAbsolute(parsed.emergencyPath)) return null;
+    return parsed as StartupRestoreJournal;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Repairs an interrupted startup restore before the database is opened: either
+ * finishes the already-confirmed swap or discards a swap that never happened.
+ * Only journal-scoped files are touched, so unrelated files are never at risk,
+ * and the emergency copy is always kept for manual inspection.
+ */
+export function recoverInterruptedStartupRestore(dbPath: string): void {
+  const journalPath = startupRestoreJournalPath(dbPath);
+  let journal: StartupRestoreJournal | null;
+  try {
+    if (!fs.existsSync(journalPath)) return;
+    journal = readStartupRestoreJournal(journalPath);
+  } catch {
+    return;
+  }
+  if (!journal || journal.dbPath !== path.resolve(dbPath)) {
+    // Never guess about files we cannot attribute; fail closed and leave everything.
+    console.warn('[DB] Ignoring an unattributable startup-restore journal:', journalPath);
+    return;
+  }
+  const pathExists = (target: string): boolean => {
+    try { return !fs.lstatSync(target).isSymbolicLink() && fs.lstatSync(target).isFile(); } catch { return false; }
+  };
+
+  if (journal.phase === 'committed') {
+    try { fs.unlinkSync(journalPath); } catch { /* already gone */ }
+    console.warn(`[DB] Completed startup restore retained its emergency copy: ${journal.emergencyPath}`);
+    return;
+  }
+
+  // Both open phases are resolved from what is actually on disk rather than
+  // from the recorded phase, because the crash may have cost us a journal write:
+  // the staged file is consumed by the rename, so its absence proves the swap
+  // landed, and the rename is atomic, so the live path is always a whole file.
+  if (pathExists(journal.stagedPath)) {
+    // The swap never happened, so the live database is still the original.
+    try { fs.unlinkSync(journal.stagedPath); } catch { console.warn('[DB] Could not remove stale staged restore file'); }
+    try { fs.unlinkSync(journalPath); } catch { /* keep it if removal fails */ }
+    console.warn('[DB] Discarded a startup restore that never replaced the database');
+    return;
+  }
+
+  if (pathExists(dbPath)) {
+    // The rename completed; let normal migrations run over the replacement.
+    try { fs.unlinkSync(journalPath); } catch { /* keep it if removal fails */ }
+    console.warn('[DB] Resumed a startup restore whose replacement is already in place');
+    return;
+  }
+
+  // The live path is missing: reinstall the preserved original bytes.
+  if (pathExists(journal.emergencyPath)) {
+    fs.copyFileSync(journal.emergencyPath, dbPath);
+    syncFile(dbPath);
+    syncDirectory(path.dirname(dbPath));
+    try { fs.renameSync(journalPath, `${journalPath}.recovered`); } catch { /* keep evidence */ }
+    console.warn('[DB] Reinstalled the original database after an interrupted startup restore');
+    return;
+  }
+
+  throw new Error(
+    `Interrupted startup restore left no database at ${dbPath} and no recoverable copy; ` +
+    `inspect ${journalPath} before deleting anything`,
+  );
+}
+
+/**
+ * Restores a validated whole-file backup over the live database.
+ *
+ * Order matters: the replacement is staged and validated beside the live file
+ * first, the WAL is checkpointed and connections closed, an emergency copy of the
+ * current state is verified, and only then is the live path replaced — by an
+ * atomic rename of a fully written file, so the production path never holds a
+ * partial database. Any failure after the emergency copy exists rolls the live
+ * path back to those exact original bytes before rethrowing.
+ *
+ * `onStep` observes (and can abort) each step; production passes none.
+ */
+export function performStartupRestore(
+  sourcePath: string,
+  onStep?: (step: StartupRestoreStep) => void,
+): { emergencyPath: string; restoredSchemaVersion: number } {
+  const dbPath = getDbPath();
+  const resolvedSource = path.resolve(sourcePath);
+  const unique = `${Date.now().toString(36)}-${crypto.randomBytes(6).toString('hex')}`;
+  const stagedPath = startupRestoreStagedPath(dbPath, unique);
+  const emergencyPath = startupRestoreEmergencyPath(dbPath, unique);
+  const journalPath = startupRestoreJournalPath(dbPath);
+  const samePath = (left: string, right: string): boolean =>
+    (process.platform === 'win32' || process.platform === 'darwin')
+      ? left.toLowerCase() === right.toLowerCase()
+      : left === right;
+
+  if (samePath(resolvedSource, path.resolve(dbPath))) {
+    throw new StartupRestoreError('Refusing to restore the active database over itself', false);
+  }
+
+  let touchedLive = false;
+  let journalWritten = false;
+  const cleanupStaged = (): void => {
+    try { if (fs.existsSync(stagedPath)) fs.unlinkSync(stagedPath); } catch { console.warn('[DB] Could not remove staged restore file'); }
+  };
+
+  try {
+    onStep?.('staged');
+    fs.copyFileSync(resolvedSource, stagedPath);
+    syncFile(stagedPath);
+    const stagedVerdict = inspectRestoreDatabaseFile(stagedPath);
+    if (stagedVerdict.ok === false) throw new Error(`the staged replacement failed validation: ${stagedVerdict.reason}`);
+
+    onStep?.('checkpoint');
+    // Fold committed WAL pages into the main file before anything copies it.
+    try { getDatabase().pragma('wal_checkpoint(TRUNCATE)'); } catch { /* handle already gone */ }
+    onStep?.('closed');
+    closeDatabase();
+
+    onStep?.('emergency');
+    if (fs.existsSync(emergencyPath)) throw new Error('the emergency recovery path already exists');
+    fs.copyFileSync(dbPath, emergencyPath);
+    syncFile(emergencyPath);
+    const emergencyVerdict = inspectRestoreDatabaseFile(emergencyPath);
+    if (emergencyVerdict.ok === false) {
+      try { fs.unlinkSync(emergencyPath); } catch { console.warn('[DB] Could not remove an unverified emergency copy'); }
+      throw new Error(`the emergency copy failed verification: ${emergencyVerdict.reason}`);
+    }
+
+    writeStartupRestoreJournal(journalPath, { phase: 'prepared', dbPath: path.resolve(dbPath), stagedPath, emergencyPath });
+    journalWritten = true;
+
+    onStep?.('swap');
+    touchedLive = true;
+    const removalFailures = removeDatabaseFiles(dbPath);
+    if (removalFailures.length > 0) {
+      throw new Error(`could not clear the live database files: ${removalFailures.join(', ')}`);
+    }
+    // The staged file is complete and sits on the same filesystem, so this move
+    // publishes the whole replacement at once instead of copying into it.
+    fs.renameSync(stagedPath, dbPath);
+    syncFile(dbPath);
+    syncDirectory(path.dirname(dbPath));
+    // The rename consumed the staged file, so the live path now holds the
+    // replacement: record that before initialization can fail.
+    writeStartupRestoreJournal(journalPath, { phase: 'swapped', dbPath: path.resolve(dbPath), stagedPath, emergencyPath });
+
+    onStep?.('initialize');
+    initDatabase(false, true);
+    writeStartupRestoreJournal(journalPath, { phase: 'committed', dbPath: path.resolve(dbPath), stagedPath, emergencyPath });
+    const restoredSchemaVersion = getCurrentSchemaVersion();
+    cleanupStaged();
+    return { emergencyPath, restoredSchemaVersion };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    let rollbackNote = '';
+    if (touchedLive) {
+      // Put the exact original bytes back before reporting anything.
+      try {
+        closeDatabase();
+        const removalFailures = removeDatabaseFiles(dbPath);
+        if (removalFailures.length > 0) throw new Error(`could not clear the failed restore: ${removalFailures.join(', ')}`);
+        if (!fs.existsSync(emergencyPath)) throw new Error('the emergency copy is missing');
+        fs.copyFileSync(emergencyPath, dbPath);
+        syncFile(dbPath);
+        syncDirectory(path.dirname(dbPath));
+        rollbackNote = '; the original database was restored from the emergency copy';
+      } catch (rollbackError) {
+        const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+        rollbackNote = `; the original database could not be reinstalled automatically (${rollbackMessage}) — ` +
+          `the emergency copy is preserved at ${emergencyPath}`;
+      }
+    }
+    cleanupStaged();
+    if (journalWritten) {
+      try { fs.unlinkSync(journalPath); } catch { console.warn('[DB] Could not remove startup-restore journal'); }
+    }
+    if (fs.existsSync(emergencyPath)) {
+      console.warn(`[DB] Startup restore left its emergency copy in place: ${emergencyPath}`);
+    }
+    throw new StartupRestoreError(`Startup restore failed: ${message}${rollbackNote}`, touchedLive);
+  }
+}
+
 function getSchemaDefinitions(dbInstance: Database.Database): Map<string, string> {
   const rows = dbInstance.prepare(`
     SELECT type, name, sql
@@ -1738,6 +2332,419 @@ function getSchemaDefinitions(dbInstance: Database.Database): Map<string, string
     `${row.type}:${row.name}`,
     (row.sql || '').replace(/\s+/g, ' ').trim(),
   ]));
+}
+
+function tableExists(dbInstance: Database.Database, tableName: string): boolean {
+  try {
+    return !!dbInstance.prepare(
+      `SELECT 1 FROM sqlite_master WHERE type IN ('table','view') AND name = ?`
+    ).get(tableName);
+  } catch {
+    return false;
+  }
+}
+
+// Row count of a live table, or -1 when it cannot be read. A negative result is
+// treated as "non-empty" by callers so an unreadable leftover is never dropped.
+function tableRowCount(dbInstance: Database.Database, tableName: string): number {
+  try {
+    const row = dbInstance.prepare(`SELECT COUNT(*) AS n FROM "${tableName}"`).get() as { n: number };
+    return row?.n ?? -1;
+  } catch {
+    return -1;
+  }
+}
+
+function getLiveTableSql(dbInstance: Database.Database, tableName: string): string {
+  try {
+    const row = dbInstance.prepare(
+      `SELECT sql FROM sqlite_master WHERE type='table' AND name = ?`
+    ).get(tableName) as { sql: string } | undefined;
+    return row?.sql ?? '';
+  } catch {
+    return '';
+  }
+}
+
+// The whatsapp kind CHECK and the journal source_module CHECK each exist in two
+// shapes; only the stored DDL text distinguishes them, so column existence can
+// never serve as the guard (a dormant divergence the convergence spec proves).
+function tableDdlIncludes(dbInstance: Database.Database, tableName: string, token: string): boolean {
+  return getLiveTableSql(dbInstance, tableName).includes(token);
+}
+
+// ── Upstream v93-v98 helpers ──────────────────────────────────────────────
+// Each is idempotent and state-aware: safe on a fresh install, on an upstream
+// database that already applied the change, and on a fork database that skipped
+// it entirely. v93-v98 and the v1001 catch-up both call these, so there is a
+// single source of truth for the six upstream object groups.
+
+function ensureUpstreamConfigurablePermissions(): void {
+  // Split from upstream's single exec into three guarded blocks so each table
+  // is individually idempotent (a partial prior run leaves no poison state).
+  if (!tableExists(db, 'role_permission_overrides')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS role_permission_overrides (
+        role TEXT NOT NULL ${USER_ROLE_SQL_CHECK},
+        permission_id TEXT NOT NULL,
+        effect TEXT NOT NULL CHECK (effect IN ('allow', 'deny')),
+        updated_by TEXT NOT NULL REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (role, permission_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_role_permission_overrides_role
+        ON role_permission_overrides(role);
+    `);
+  }
+  if (!tableExists(db, 'user_permission_overrides')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_permission_overrides (
+        user_id TEXT NOT NULL REFERENCES users(id),
+        permission_id TEXT NOT NULL,
+        effect TEXT NOT NULL CHECK (effect IN ('allow', 'deny')),
+        updated_by TEXT NOT NULL REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, permission_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_permission_overrides_user
+        ON user_permission_overrides(user_id);
+    `);
+  }
+  if (!tableExists(db, 'authorization_audit_log')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS authorization_audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id TEXT NOT NULL,
+        actor_user_id TEXT NOT NULL REFERENCES users(id),
+        target_type TEXT NOT NULL CHECK (target_type IN ('role', 'user')),
+        target_id TEXT NOT NULL,
+        permission_id TEXT NOT NULL,
+        previous_effect TEXT CHECK (previous_effect IS NULL OR previous_effect IN ('allow', 'deny')),
+        next_effect TEXT CHECK (next_effect IS NULL OR next_effect IN ('allow', 'deny')),
+        details_json TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_authorization_audit_created
+        ON authorization_audit_log(created_at, id);
+      CREATE INDEX IF NOT EXISTS idx_authorization_audit_target
+        ON authorization_audit_log(target_type, target_id, id);
+    `);
+  }
+}
+
+function ensureUpstreamOrderDeliveryAddress(): void {
+  if (!getColumns(db, 'orders').includes('delivery_address')) {
+    db.exec(`ALTER TABLE orders ADD COLUMN delivery_address TEXT DEFAULT NULL`);
+  }
+  db.prepare('INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)').run(
+    'bill_delivery_show_customer_phone_always',
+    'true',
+    now(),
+  );
+}
+
+function ensureUpstreamLocalDiagnosticsLog(): void {
+  insertSettingIfMissing('diagnostics_transmission_enabled', 'false');
+  if (!tableExists(db, 'local_diagnostics')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS local_diagnostics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_code TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        error_class TEXT NOT NULL,
+        signature TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        metadata_json TEXT,
+        occurred_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_local_diagnostics_created
+        ON local_diagnostics(created_at, id);
+    `);
+  }
+}
+
+function ensureWhatsAppZReportKind(): void {
+  // Nothing to widen if the table isn't there yet (a pre-v29 schema, or a
+  // minimal synthetic fixture). Creating it is v29's job, not this rebuild's.
+  if (!tableExists(db, 'whatsapp_messages') && !tableExists(db, 'whatsapp_messages_v95')) return;
+  // Recovery from a partial prior rebuild: a crashed run can leave the table
+  // renamed to its temp name. Restore the authoritative table first.
+  const mainExists = tableExists(db, 'whatsapp_messages');
+  const tempExists = tableExists(db, 'whatsapp_messages_v95');
+  if (!mainExists && tempExists) {
+    db.exec(`ALTER TABLE whatsapp_messages_v95 RENAME TO whatsapp_messages`);
+  } else if (mainExists && tempExists) {
+    // Fail-closed: a leftover whatsapp_messages_v95 may hold rows the main table
+    // does not. Having `kind` (or a widened CHECK) does NOT prove main is the
+    // data authority, so a non-empty leftover is never dropped — stop and
+    // preserve both tables instead. An unreadable count (-1) counts as non-empty.
+    const leftoverRows = tableRowCount(db, 'whatsapp_messages_v95');
+    if (leftoverRows !== 0) {
+      throw new MigrationConvergenceError([
+        {
+          objectType: 'table',
+          object: 'whatsapp_messages_v95',
+          problem: 'leftover rebuild table conflicts with whatsapp_messages',
+          detail: `${leftoverRows < 0 ? 'an unknown number of rows' : `${leftoverRows} row(s)`}; refusing to drop it without proof its rows are preserved in whatsapp_messages`,
+        },
+      ], WHATSAPP_REBUILD_OWNER.version, WHATSAPP_REBUILD_OWNER.name);
+    }
+    // The leftover is provably empty, so dropping it loses nothing. Main must
+    // still look intact before we discard the leftover.
+    if (!getColumns(db, 'whatsapp_messages').includes('kind')) {
+      throw new MigrationConvergenceError([
+        {
+          objectType: 'table',
+          object: 'whatsapp_messages',
+          problem: 'ambiguous rebuild state: missing its kind column while an empty whatsapp_messages_v95 remains; refusing to reconcile',
+        },
+      ], WHATSAPP_REBUILD_OWNER.version, WHATSAPP_REBUILD_OWNER.name);
+    }
+    db.exec(`DROP TABLE whatsapp_messages_v95`);
+  }
+  // Already widened? Nothing to do.
+  if (tableDdlIncludes(db, 'whatsapp_messages', "'z_report'")) return;
+  // Rebuild with the widened kind CHECK, preserving every row and column.
+  db.exec(`
+    ALTER TABLE whatsapp_messages RENAME TO whatsapp_messages_v95;
+    CREATE TABLE whatsapp_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bill_id INTEGER REFERENCES bills(id),
+      customer_id TEXT REFERENCES customers(id),
+      phone_e164 TEXT NOT NULL,
+      direction TEXT NOT NULL CHECK (direction IN ('outbound','inbound')),
+      kind TEXT NOT NULL DEFAULT 'manual_reply'
+        CHECK (kind IN ('bill_receipt','manual_reply','auto_followup','z_report')),
+      status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued','seen','typing','sent','delivered','read','failed')),
+      body TEXT NOT NULL,
+      external_message_id TEXT,
+      error TEXT,
+      queued_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      seen_at TEXT,
+      typing_at TEXT,
+      sent_at TEXT,
+      delivered_at TEXT,
+      read_at TEXT,
+      failed_at TEXT,
+      created_by_user_id TEXT
+    );
+    INSERT INTO whatsapp_messages (
+      id, bill_id, customer_id, phone_e164, direction, kind, status, body,
+      external_message_id, error, queued_at, seen_at, typing_at, sent_at,
+      delivered_at, read_at, failed_at, created_by_user_id
+    )
+    SELECT
+      id, bill_id, customer_id, phone_e164, direction, kind, status, body,
+      external_message_id, error, queued_at, seen_at, typing_at, sent_at,
+      delivered_at, read_at, failed_at, created_by_user_id
+    FROM whatsapp_messages_v95;
+    DROP TABLE whatsapp_messages_v95;
+  `);
+  db.exec(`
+    CREATE INDEX idx_whatsapp_messages_phone
+      ON whatsapp_messages(phone_e164, queued_at DESC);
+    CREATE INDEX idx_whatsapp_messages_status
+      ON whatsapp_messages(status, queued_at DESC);
+    CREATE INDEX idx_whatsapp_messages_bill
+      ON whatsapp_messages(bill_id);
+    CREATE INDEX idx_whatsapp_messages_inbound_unread
+      ON whatsapp_messages(direction, status, queued_at DESC)
+      WHERE direction = 'inbound' AND status NOT IN ('read','failed');
+  `);
+}
+
+function ensureKitchenDeliverySettlementSetting(): void {
+  insertSettingIfMissing('require_kitchen_delivered_before_settlement', 'false');
+}
+
+function ensureCategoryAddonGroups(): void {
+  if (!tableExists(db, 'category_addon_groups')) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS category_addon_groups (
+        category_id TEXT NOT NULL,
+        addon_group_id TEXT NOT NULL,
+        PRIMARY KEY (category_id, addon_group_id),
+        FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE,
+        FOREIGN KEY (addon_group_id) REFERENCES addon_groups(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_category_addon_groups_category ON category_addon_groups(category_id);
+      CREATE INDEX IF NOT EXISTS idx_category_addon_groups_group ON category_addon_groups(addon_group_id);
+    `);
+  }
+}
+
+// Runs inside the v1001 catch-up transaction: if any upstream object group is
+// still missing after the ensures, that is a real convergence failure and must
+// roll back rather than let the database advance believing it converged.
+// ── Structural postcondition helpers ─────────────────────────────────────
+// Presence alone is not convergence: a same-named table missing a column, an
+// index, a foreign key or a CHECK would otherwise be reported as migrated and
+// never repaired. Whitespace and parenthesis differences are normalized away to
+// avoid brittle text comparison, while real structural drift still fails the
+// catch-up (and therefore rolls back).
+
+// Identity of the catch-up, shared with its registry entry so a renumbering
+// cannot desynchronize the entry from the diagnostic it raises.
+const CATCH_UP_MIGRATION_VERSION = 1001;
+const CATCH_UP_MIGRATION_NAME = 'catch_up_upstream_v93_to_v98';
+
+// The whatsapp rebuild belongs to upstream v96; the v1001 catch-up replays it,
+// so the conflicting table pair is reported under its owning migration.
+const WHATSAPP_REBUILD_OWNER = { version: 96, name: 'add_whatsapp_z_report_kind' };
+
+function normalizeSql(sql: string): string {
+  return sql.replace(/\s+/g, ' ').replace(/\s*,\s*/g, ',').replace(/\s*\(\s*/g, '(').replace(/\s*\)\s*/g, ')').trim().toLowerCase();
+}
+
+type ColumnSpec = { name: string; type?: string; notnull?: boolean; pk?: number };
+
+function schemaColumnProblems(table: string, specs: ColumnSpec[]): MigrationConvergenceProblem[] {
+  if (!tableExists(db, table)) return [{ objectType: 'table', object: table, problem: 'table missing' }];
+  const live = db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string; type: string; notnull: number; pk: number }>;
+  const byName = new Map(live.map((c) => [c.name.toLowerCase(), c]));
+  const problems: MigrationConvergenceProblem[] = [];
+  for (const spec of specs) {
+    const object = `${table}.${spec.name}`;
+    const col = byName.get(spec.name.toLowerCase());
+    if (!col) { problems.push({ objectType: 'column', object, problem: 'column missing' }); continue; }
+    if (spec.type && col.type.toUpperCase() !== spec.type.toUpperCase()) problems.push({ objectType: 'column', object, problem: 'column type mismatch', detail: `${col.type} != ${spec.type}` });
+    if (spec.notnull !== undefined && (col.notnull !== 0) !== spec.notnull) problems.push({ objectType: 'column', object, problem: 'column nullability mismatch', detail: spec.notnull ? 'expected NOT NULL' : 'expected nullable' });
+    if (spec.pk !== undefined && col.pk !== spec.pk) problems.push({ objectType: 'column', object, problem: 'primary-key position mismatch', detail: `${col.pk} != ${spec.pk}` });
+  }
+  return problems;
+}
+
+function schemaIndexProblems(table: string, required: string[]): MigrationConvergenceProblem[] {
+  if (!tableExists(db, table)) return [];
+  const live = new Set((db.prepare(`PRAGMA index_list("${table}")`).all() as Array<{ name: string }>).map((i) => i.name));
+  return required
+    .filter((name) => !live.has(name))
+    .map((name) => ({ objectType: 'index' as const, object: `${table}.${name}`, problem: 'index missing' }));
+}
+
+type ForeignKeySpec = { from: string; table: string; to?: string; onDelete?: string };
+
+function schemaForeignKeyProblems(table: string, required: ForeignKeySpec[]): MigrationConvergenceProblem[] {
+  if (!tableExists(db, table)) return [];
+  const live = db.prepare(`PRAGMA foreign_key_list("${table}")`).all() as Array<{ table: string; from: string; to: string; on_delete: string }>;
+  const problems: MigrationConvergenceProblem[] = [];
+  for (const spec of required) {
+    const object = `${table}.${spec.from}`;
+    const target = `${spec.table}${spec.to ? '.' + spec.to : ''}`;
+    const match = live.find((fk) => fk.from.toLowerCase() === spec.from.toLowerCase() && fk.table.toLowerCase() === spec.table.toLowerCase() && (!spec.to || fk.to.toLowerCase() === spec.to.toLowerCase()));
+    if (!match) { problems.push({ objectType: 'foreign_key', object, problem: 'foreign key missing', detail: `expected reference to ${target}` }); continue; }
+    if (spec.onDelete && match.on_delete.toUpperCase() !== spec.onDelete.toUpperCase()) problems.push({ objectType: 'foreign_key', object, problem: 'foreign key ON DELETE mismatch', detail: `${match.on_delete} != ${spec.onDelete}` });
+  }
+  return problems;
+}
+
+function schemaCheckProblems(table: string, tokens: string[]): MigrationConvergenceProblem[] {
+  if (!tableExists(db, table)) return [];
+  const sql = normalizeSql(getLiveTableSql(db, table));
+  return tokens
+    .filter((token) => !sql.includes(normalizeSql(token)))
+    .map((token) => ({ objectType: 'check_constraint' as const, object: table, problem: 'CHECK constraint missing', detail: token }));
+}
+
+function settingsProblems(keys: string[]): MigrationConvergenceProblem[] {
+  if (!tableExists(db, 'settings')) {
+    return keys.map((key) => ({ objectType: 'setting' as const, object: key, problem: 'settings table missing' }));
+  }
+  const exists = db.prepare('SELECT 1 FROM settings WHERE key = ?');
+  return keys
+    .filter((key) => !exists.get(key))
+    .map((key) => ({ objectType: 'setting' as const, object: key, problem: 'setting row missing' }));
+}
+
+function assertUpstreamCatchUpPostconditions(): void {
+  const problems: MigrationConvergenceProblem[] = [];
+
+  // v93 — every configurable-permission object, not just the first table. The
+  // volatile role CHECK (USER_ROLE_SQL_CHECK) is intentionally not asserted.
+  problems.push(...schemaColumnProblems('role_permission_overrides', [
+    { name: 'role', type: 'TEXT', notnull: true, pk: 1 },
+    { name: 'permission_id', type: 'TEXT', notnull: true, pk: 2 },
+    { name: 'effect', type: 'TEXT', notnull: true },
+    { name: 'updated_by', type: 'TEXT', notnull: true },
+  ]));
+  problems.push(...schemaIndexProblems('role_permission_overrides', ['idx_role_permission_overrides_role']));
+  problems.push(...schemaForeignKeyProblems('role_permission_overrides', [{ from: 'updated_by', table: 'users', to: 'id' }]));
+  problems.push(...schemaCheckProblems('role_permission_overrides', ["effect IN ('allow', 'deny')"]));
+
+  problems.push(...schemaColumnProblems('user_permission_overrides', [
+    { name: 'user_id', type: 'TEXT', notnull: true, pk: 1 },
+    { name: 'permission_id', type: 'TEXT', notnull: true, pk: 2 },
+    { name: 'effect', type: 'TEXT', notnull: true },
+    { name: 'updated_by', type: 'TEXT', notnull: true },
+  ]));
+  problems.push(...schemaIndexProblems('user_permission_overrides', ['idx_user_permission_overrides_user']));
+  problems.push(...schemaForeignKeyProblems('user_permission_overrides', [
+    { from: 'user_id', table: 'users', to: 'id' },
+    { from: 'updated_by', table: 'users', to: 'id' },
+  ]));
+  problems.push(...schemaCheckProblems('user_permission_overrides', ["effect IN ('allow', 'deny')"]));
+
+  problems.push(...schemaColumnProblems('authorization_audit_log', [
+    { name: 'id', type: 'INTEGER', pk: 1 },
+    { name: 'batch_id', type: 'TEXT', notnull: true },
+    { name: 'actor_user_id', type: 'TEXT', notnull: true },
+    { name: 'target_type', type: 'TEXT', notnull: true },
+    { name: 'target_id', type: 'TEXT', notnull: true },
+    { name: 'permission_id', type: 'TEXT', notnull: true },
+  ]));
+  problems.push(...schemaIndexProblems('authorization_audit_log', ['idx_authorization_audit_created', 'idx_authorization_audit_target']));
+  problems.push(...schemaForeignKeyProblems('authorization_audit_log', [{ from: 'actor_user_id', table: 'users', to: 'id' }]));
+  problems.push(...schemaCheckProblems('authorization_audit_log', ["target_type IN ('role', 'user')"]));
+
+  // v94 — the delivery-address column is additive and nullable by contract.
+  if (!getColumns(db, 'orders').includes('delivery_address')) {
+    problems.push({ objectType: 'column', object: 'orders.delivery_address', problem: 'column missing' });
+  }
+
+  // v95 — the operator-readable local diagnostics log.
+  problems.push(...schemaColumnProblems('local_diagnostics', [
+    { name: 'id', type: 'INTEGER', pk: 1 },
+    { name: 'event_code', type: 'TEXT', notnull: true },
+    { name: 'severity', type: 'TEXT', notnull: true },
+    { name: 'error_class', type: 'TEXT', notnull: true },
+    { name: 'signature', type: 'TEXT', notnull: true },
+    { name: 'summary', type: 'TEXT', notnull: true },
+    { name: 'occurred_at', type: 'TEXT', notnull: true },
+  ]));
+  problems.push(...schemaIndexProblems('local_diagnostics', ['idx_local_diagnostics_created']));
+
+  // v96 — the whatsapp kind CHECK must accept the z_report identity.
+  if (!tableDdlIncludes(db, 'whatsapp_messages', "'z_report'")) {
+    problems.push({ objectType: 'check_constraint', object: 'whatsapp_messages', problem: 'CHECK constraint missing', detail: "kind must accept 'z_report'" });
+  }
+
+  // v98 — category add-on groups, including both declared foreign keys.
+  problems.push(...schemaColumnProblems('category_addon_groups', [
+    { name: 'category_id', type: 'TEXT', notnull: true, pk: 1 },
+    { name: 'addon_group_id', type: 'TEXT', notnull: true, pk: 2 },
+  ]));
+  problems.push(...schemaIndexProblems('category_addon_groups', ['idx_category_addon_groups_category', 'idx_category_addon_groups_group']));
+  problems.push(...schemaForeignKeyProblems('category_addon_groups', [
+    { from: 'category_id', table: 'categories', to: 'id', onDelete: 'CASCADE' },
+    { from: 'addon_group_id', table: 'addon_groups', to: 'id', onDelete: 'CASCADE' },
+  ]));
+
+  // v94/v95/v97 — the required settings. Presence is the invariant the catch-up
+  // guarantees; each value is merchant-configurable, so the value is deliberately
+  // not pinned to a default here (a user edit must survive).
+  problems.push(...settingsProblems([
+    'bill_delivery_show_customer_phone_always',
+    'diagnostics_transmission_enabled',
+    'require_kitchen_delivered_before_settlement',
+  ]));
+
+  if (problems.length > 0) {
+    throw new MigrationConvergenceError(problems, CATCH_UP_MIGRATION_VERSION, CATCH_UP_MIGRATION_NAME);
+  }
 }
 
 function getColumns(dbInstance: Database.Database, tableName: string): string[] {
@@ -2965,7 +3972,13 @@ function dataOnlyRestore(
     }
     try {
       getDatabase().pragma(`foreign_keys = ${previousForeignKeys ? 'ON' : 'OFF'}`);
-    } catch { }
+    } catch (restoreError) {
+      console.error('[DB] dataOnlyRestore: foreign_keys restore failed:', restoreError);
+    }
+    // Verify enforcement on the live connection and record the FK health
+    // component; the helper never throws, so it cannot alter the restore
+    // result whether the restore committed or failed.
+    recoverForeignKeyEnforcement();
   }
 }
 
@@ -5214,7 +6227,71 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
     },
   },
   {
+    // Upstream v93-v98. This fork historically overwrote these version numbers
+    // with its own migrations, so databases in the fork lineage never received
+    // these six object groups. They are restored here (delegating to the shared
+    // idempotent helpers) so a fresh install and an upstream database both
+    // converge; the v1001 catch-up below repairs existing fork databases.
     version: 93,
+    name: 'add_configurable_permissions',
+    up: () => {
+      ensureUpstreamConfigurablePermissions();
+    },
+  },
+  {
+    version: 94,
+    name: 'add_order_delivery_address',
+    up: () => {
+      ensureUpstreamOrderDeliveryAddress();
+    },
+  },
+  {
+    version: 95,
+    name: 'add_local_diagnostics_log',
+    up: () => {
+      ensureUpstreamLocalDiagnosticsLog();
+    },
+  },
+  {
+    version: 96,
+    name: 'add_whatsapp_z_report_kind',
+    up: () => {
+      ensureWhatsAppZReportKind();
+    },
+  },
+  {
+    version: 97,
+    name: 'add_kitchen_delivery_settlement_setting',
+    up: () => {
+      ensureKitchenDeliverySettlementSetting();
+    },
+  },
+  {
+    version: 98,
+    name: 'add_category_addon_groups',
+    up: () => {
+      ensureCategoryAddonGroups();
+    },
+  },
+  {
+    // Catch-up for databases that already reported a version in the old fork
+    // range (93-104) and therefore skipped the restored upstream entries above.
+    // It re-applies all six groups state-aware, then asserts convergence so a
+    // partial result rolls back instead of advancing the schema version.
+    version: CATCH_UP_MIGRATION_VERSION,
+    name: CATCH_UP_MIGRATION_NAME,
+    up: () => {
+      ensureUpstreamConfigurablePermissions();
+      ensureUpstreamOrderDeliveryAddress();
+      ensureUpstreamLocalDiagnosticsLog();
+      ensureWhatsAppZReportKind();
+      ensureKitchenDeliverySettlementSetting();
+      ensureCategoryAddonGroups();
+      assertUpstreamCatchUpPostconditions();
+    },
+  },
+  {
+    version: 1002,
     name: 'add_suppliers',
     up: () => {
       db.exec(`
@@ -5245,7 +6322,7 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
     },
   },
   {
-    version: 94,
+    version: 1003,
     name: 'add_purchase_invoices',
     up: () => {
       db.exec(`
@@ -5298,7 +6375,7 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
     },
   },
   {
-    version: 95,
+    version: 1004,
     name: 'add_supplier_payments',
     up: () => {
       db.exec(`
@@ -5322,7 +6399,7 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
     },
   },
   {
-    version: 96,
+    version: 1005,
     name: 'add_purchase_returns',
     up: () => {
       db.exec(`
@@ -5378,7 +6455,7 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
     },
   },
   {
-    version: 97,
+    version: 1006,
     name: 'add_supply_cost_price',
     up: () => {
       // Guarded like v2/v20: re-runs over an upgraded database must not fail or
@@ -5416,7 +6493,7 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
     },
   },
   {
-    version: 98,
+    version: 1007,
     name: 'add_expenses',
     up: () => {
       db.exec(`
@@ -5439,7 +6516,7 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
     },
   },
   {
-    version: 99,
+    version: 1008,
     name: 'add_receivables',
     up: () => {
       db.exec(`
@@ -5468,7 +6545,7 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
     },
   },
   {
-    version: 101,
+    version: 1009,
     name: 'add_fiscal_periods',
     up: () => {
       db.exec(`
@@ -5493,7 +6570,7 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
     },
   },
   {
-    version: 102,
+    version: 1010,
     name: 'add_accounting_core',
     up: () => {
       db.exec(`
@@ -5564,9 +6641,14 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
     },
   },
   {
-    version: 103,
+    version: 1011,
     name: 'add_opening_balance_source_module',
     up: () => {
+      // Re-run safety: after the 93-104 -> 1002-1012 renumber, a database that
+      // already carries the opening-balance source module (any fork DB at v103+)
+      // re-enters this migration. If the CHECK already allows it, the rebuild is
+      // a pure no-op that would only risk the data, so skip it.
+      if (tableDdlIncludes(db, 'journal_entries', "'opening_balance'")) return;
       // SQLite cannot ALTER a column CHECK constraint; rebuild journal_entries
       // so the opening-balance source identity can be stored natively.
       const journalIndexes = (db.prepare(`
@@ -5607,7 +6689,7 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
     },
   },
   {
-    version: 104,
+    version: 1012,
     name: 'add_cogs_accounting',
     up: () => {
       // Frozen cost snapshot columns stay nullable: movements written before
@@ -5621,6 +6703,8 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
         db.exec(`ALTER TABLE supply_movements ADD COLUMN total_cost REAL`);
       }
 
+      // Re-run safety (see v1011): skip if the CHECK already allows 'cogs'.
+      if (!tableDdlIncludes(db, 'journal_entries', "'cogs'")) {
       // SQLite cannot ALTER a column CHECK constraint; rebuild journal_entries
       // so the COGS source identity can be stored natively.
       const journalIndexes = (db.prepare(`
@@ -5655,6 +6739,7 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
       `);
       for (const index of journalIndexes) {
         db.exec(index.sql);
+      }
       }
 
       // COGS account: the expense side of the inventory-to-cost transfer.
@@ -5736,9 +6821,33 @@ export class SchemaVersionMismatchError extends Error {
   }
 }
 
+// Safety gate (design §7): the migration registry must be strictly ascending
+// with unique, positive integer versions and a well-defined tail. This catches a
+// renumbering or ordering mistake at runtime -- before any migration -- rather
+// than letting a mis-ordered batch run destructive DDL out of order.
+function validateMigrationRegistry(): number {
+  const tail = MIGRATIONS.length > 0 ? MIGRATIONS[MIGRATIONS.length - 1].version : 0;
+  let previous = 0;
+  for (const migration of MIGRATIONS) {
+    if (!Number.isInteger(migration.version) || migration.version <= 0) {
+      throw new Error(`Migration registry is invalid: v${migration.version} (${migration.name}) is not a positive integer`);
+    }
+    if (migration.version <= previous) {
+      throw new Error(
+        `Migration registry is invalid: v${migration.version} (${migration.name}) does not follow v${previous} — versions must be unique and strictly ascending`
+      );
+    }
+    previous = migration.version;
+  }
+  if (MIGRATIONS.length > 0 && tail !== previous) {
+    throw new Error(`Migration registry is invalid: tail v${tail} does not match the last entry v${previous}`);
+  }
+  return tail;
+}
+
 function runMigrations(): void {
   const current = getCurrentSchemaVersion();
-  const target = MIGRATIONS.length > 0 ? MIGRATIONS[MIGRATIONS.length - 1].version : 0;
+  const target = validateMigrationRegistry();
   const verboseMigrationLogs = process.env.FLOCAFE_TEST_VERBOSE === '1';
 
   if (current > target) {

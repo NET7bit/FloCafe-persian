@@ -48,3 +48,11 @@ test-results/
 
 # Local agent/tool session metadata (e.g. Codebuff project id) — never commit
 .freebuff/
+.clinerules/
+.kilocodemodes
+
+# Editor workspace settings stay local
+.vscode/
+
+# AutoClaw KDream data
+.autoclaw/

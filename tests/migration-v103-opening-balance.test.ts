@@ -20,8 +20,9 @@ Module._load = function (request: string, parent: unknown, isMain: boolean) {
 };
 
 const { MIGRATIONS } = require('../main/db');
-const TARGET_VERSION = 103;
-const target = MIGRATIONS.find((m: any) => m.version === TARGET_VERSION);
+// Locate by name (not version) so the lookup survives migration renumbering.
+const target = MIGRATIONS.find((m: any) => m.name === 'add_opening_balance_source_module');
+const TARGET_VERSION = target.version;
 
 let passed = 0;
 let failed = 0;
@@ -45,7 +46,7 @@ function getDb(): any {
 async function main() {
   console.log(`Migration v${TARGET_VERSION} (add_opening_balance_source_module) test`);
   console.log('='.repeat(50));
-  assertEqual(TARGET_VERSION, 103, 'the test targets migration v103');
+  assertEqual(target.name, 'add_opening_balance_source_module', 'the opening-balance migration is registered');
 
   // ── Fresh install: all migrations from v1 ──
   const { initDatabase } = require('../main/db');
