@@ -18,6 +18,7 @@ import { getCountryByCode, getCurrencyFractionDigits, getCurrencySymbol, resolve
 import { resolveTaxComponents } from '../services/tax-components';
 import { loadInstalledPrintTemplate, parseBillTemplateSelection } from '../services/print-templates';
 import { renderMerchantReceiptViaDocument } from './document-merchant';
+import { insertLogoAfterInit, loadReceiptLogo, resolveUserDataPath } from './logo-raster';
 import { correlationId, type FloErrorCode } from '../errors';
 import { sendEvent } from '../services/telemetry';
 import { cloudSync } from '../services/cloud-sync';
@@ -1566,7 +1567,28 @@ async function rasterizeReceiptIfEnabled(
     : prepared;
 }
 
+/**
+ * Render a receipt and, when the store has dropped a logo at
+ * `<userData>/logo.png`, print it centred in the header. The logo is optional at
+ * every level: a missing file, an unreadable image or a mocked Electron in tests
+ * all fall through to the plain receipt.
+ */
 export function formatReceipt(order: any, bill: any, business?: any, template?: string, cols: number = 48, useUnicode: boolean = false, isReprint: boolean = false, cutMode: PrinterCutMode = 'full', warnings?: PrintWarning[], arabicShaping: boolean = false, language?: string, additionalLanguage?: string, capabilities?: ThermalPrinterCapabilities): Buffer {
+  const body = renderReceiptBody(order, bill, business, template, cols, useUnicode, isReprint, cutMode, warnings, arabicShaping, language, additionalLanguage, capabilities);
+  const userDataPath = resolveUserDataPath();
+  if (!userDataPath) return body;
+  let enabled = true;
+  try {
+    enabled = getSettingValue('receipt_show_logo') !== 'false';
+  } catch {
+    // No database yet (unit tests, early boot): fall through to the plain receipt.
+    enabled = true;
+  }
+  if (!enabled) return body;
+  return insertLogoAfterInit(body, loadReceiptLogo(userDataPath, cols));
+}
+
+function renderReceiptBody(order: any, bill: any, business?: any, template?: string, cols: number = 48, useUnicode: boolean = false, isReprint: boolean = false, cutMode: PrinterCutMode = 'full', warnings?: PrintWarning[], arabicShaping: boolean = false, language?: string, additionalLanguage?: string, capabilities?: ThermalPrinterCapabilities): Buffer {
   console.log('[Printer] formatReceipt - template:', template);
   console.log('[Printer] formatReceipt - order:', order?.order_number, 'bill:', bill?.bill_number);
   console.log('[Printer] formatReceipt - items count:', order?.items?.length || 0, 'cols:', cols);

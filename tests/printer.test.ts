@@ -491,7 +491,7 @@ console.log('\n✅ Test 1b2: Arabic shaping capability gate');
   assert('locale warnings use actionable language-load guidance', toastMessages.length === 3 && toastMessages[2].includes('Print language bundle(s) "de"') && !toastMessages[2].includes('line was not printed'));
 
   // The full receipt path threads the flag into the encoder.
-  const persianBiz = { ...fixtureBusiness, name: 'کافه فلو تهران', currency_symbol: 'IRR', country: 'IR' };
+  const persianBiz = { ...fixtureBusiness, name: 'کافه فلو تهران', currency_symbol: 'IRR', country: 'IR', currency_display: 'rial' };
   const persianReceiptOrder = {
     ...fixtureOrder,
     items: [
@@ -1083,6 +1083,7 @@ console.log('\n✅ Test 11: IR country thermal receipt financial-line preservati
     name: 'Flo Cafe Tehran',
     country: 'IR',
     currency: 'IRR',
+    currency_display: 'rial',
     currency_symbol: realIrCurrencySymbol,
     address: 'Tehran',
     phone: '+989123456789',
@@ -1205,6 +1206,8 @@ console.log('\n✅ Test 11: IR country thermal receipt financial-line preservati
     business_name: 'Flo Cafe Tehran',
     country: 'IR',
     currency: 'IRR',
+    // These assertions pin the rial layout; toman is covered by its own tests.
+    currency_display: 'rial',
   };
 
   const frontendBill = {
