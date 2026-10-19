@@ -572,33 +572,52 @@ export default function DashboardPage() {
         <div className="flex flex-wrap items-center justify-start gap-2 xl:justify-end">
           {periodMode === 'day' ? (
             <>
-              {showsCalendarHint && (
-                <span
-                  className="rounded-lg bg-muted px-2.5 py-1 text-xs text-muted-foreground"
-                  aria-live="polite"
-                >
-                  {formatDate(new Date(`${selectedDate}T12:00:00Z`))}
-                </span>
+              {showsCalendarHint ? (
+                <>
+                  {/* The native picker prints the OS date format, which is Gregorian on a
+                      Persian store. Show the Jalali date and keep the input as the
+                      picker's backing store, reachable only through the button. */}
+                  <button
+                    type="button"
+                    onClick={() => openPicker(dayInputRef.current)}
+                    className="flex h-10 items-center gap-2 rounded-xl border border-border bg-card px-3 text-sm text-foreground shadow-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-brand/30"
+                    aria-label={t('openDatePicker')}
+                  >
+                    <CalendarDays size={16} className="text-muted-foreground" />
+                    <span aria-live="polite">{formatDate(new Date(`${selectedDate}T12:00:00Z`))}</span>
+                  </button>
+                  <input
+                    ref={dayInputRef}
+                    type="date"
+                    value={selectedDate}
+                    max={todayLocal}
+                    onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+                    className="sr-only"
+                    tabIndex={-1}
+                    aria-label={t('selectDate')}
+                  />
+                </>
+              ) : (
+                <div className="relative">
+                  <input
+                    ref={dayInputRef}
+                    type="date"
+                    value={selectedDate}
+                    max={todayLocal}
+                    onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+                    className="h-10 appearance-none rounded-xl border border-border bg-card ps-3 pe-10 text-sm text-foreground shadow-sm [color-scheme:light] focus:outline-none focus:ring-2 focus:ring-brand/30 dark:[color-scheme:dark] [&::-webkit-calendar-picker-indicator]:pointer-events-none [&::-webkit-calendar-picker-indicator]:opacity-0"
+                    aria-label={t('selectDate')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => openPicker(dayInputRef.current)}
+                    className="absolute inset-y-0 end-0 z-10 flex w-9 items-center justify-center rounded-e-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label={t('openDatePicker')}
+                  >
+                    <CalendarDays size={16} />
+                  </button>
+                </div>
               )}
-              <div className="relative">
-                <input
-                  ref={dayInputRef}
-                  type="date"
-                  value={selectedDate}
-                  max={todayLocal}
-                  onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
-                  className="h-10 appearance-none rounded-xl border border-border bg-card ps-3 pe-10 text-sm text-foreground shadow-sm [color-scheme:light] focus:outline-none focus:ring-2 focus:ring-brand/30 dark:[color-scheme:dark] [&::-webkit-calendar-picker-indicator]:pointer-events-none [&::-webkit-calendar-picker-indicator]:opacity-0"
-                  aria-label={t('selectDate')}
-                />
-                <button
-                  type="button"
-                  onClick={() => openPicker(dayInputRef.current)}
-                  className="absolute inset-y-0 end-0 z-10 flex w-9 items-center justify-center rounded-e-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  aria-label={t('openDatePicker')}
-                >
-                  <CalendarDays size={16} />
-                </button>
-              </div>
             </>
           ) : (
             <div className="relative">
