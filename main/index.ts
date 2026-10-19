@@ -571,6 +571,15 @@ const requestRuntimeRelaunchOnce = createRelaunchGate(requestRuntimeRelaunch);
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
+/**
+ * Fork builds must not self-update from the upstream release feed. This branch
+ * tracks upstream by merging it, and its migration registry (1..1012) is not
+ * the upstream one (v93..v104), so an in-place upstream package would leave the
+ * database at a version the installed code cannot open. Set `FLO_UPDATER=enabled`
+ * only when a fork-owned feed is configured.
+ */
+const isForkSelfUpdateDisabled = process.env.FLO_UPDATER !== 'enabled';
+
 let gotSingleInstanceLock = false;
 
 // Single-instance lock: prevent duplicate app instances.
@@ -1349,8 +1358,17 @@ async function initialize(): Promise<void> {
     // Auto-updater configured on non-store platforms.
     if (!isStoreBuild) {
       if (process.env.FLO_E2E_SKIP_OPTIONAL_NETWORK !== '1') {
-        setupAutoUpdater();
-        setTimeout(() => checkForUpdates(), 5000);
+        if (isForkSelfUpdateDisabled) {
+          // This build is kept current by merging upstream, not by self-update:
+          // the upstream feed ships the v93-v104 migration registry while this
+          // build runs 1..1012, so installing that package in place would strand
+          // the database. Updates are applied manually.
+          console.log('[Update] Self-update disabled for this fork build; updates are applied manually.');
+          setUpdateStatus(oneShotUpdateState('store-managed'));
+        } else {
+          setupAutoUpdater();
+          setTimeout(() => checkForUpdates(), 5000);
+        }
       }
     } else {
       // Store builds skip auto-updater and report store-managed status.
