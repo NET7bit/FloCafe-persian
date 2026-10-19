@@ -12,6 +12,7 @@ import { SHUTDOWN_TIMEOUT_MS } from './shutdown';
 import { resolveContainedPath } from './lib/path-containment';
 import { serializeMerchantTemplatePayload, validateMerchantTemplateText } from '../shared/print';
 import { ROLE_KEYS } from '../shared/role-permissions';
+import { businessDateForInstant, dayBoundsInTimezone, normalizeBusinessDayStartTime, utcDayBounds } from '../shared/business-date';
 import { getCurrencyFractionDigits, resolveRegionalSnapshot } from './countries';
 import { MigrationConvergenceError } from './migration-diagnostics';
 import type { MigrationConvergenceProblem } from './migration-diagnostics';
@@ -238,12 +239,14 @@ const DATABASE_MAINTENANCE_ROUTES = new Set([
 ]);
 
 function isDatabaseMaintenanceRoute(req: Request): boolean {
-  const fullPath = (req.baseUrl || '') + req.path;
+  // Lowercased for the same reason as requireAuth: the mount is case-insensitive,
+  // so an exact-match lookup on the raw spelling misses case variants.
+  const fullPath = ((req.baseUrl || '') + req.path).toLowerCase();
   return DATABASE_MAINTENANCE_ROUTES.has(`${req.method} ${fullPath}`);
 }
 
 export function databaseMaintenanceMiddleware(req: Request, res: Response, next: NextFunction): void {
-  const fullPath = (req.baseUrl || '') + req.path;
+  const fullPath = ((req.baseUrl || '') + req.path).toLowerCase();
   if (!fullPath.startsWith('/api')) {
     next();
     return;
@@ -372,15 +375,13 @@ export function getSettingValue(key: string): string | null {
   return row?.value ?? null;
 }
 
-/** Resolves the tenant's configured business day start time ('HH:mm', 00:00 to 11:59). */
+/** Resolves the tenant's configured business day start time, holding it to the
+ *  `00:00`-`11:59` contract the settings endpoint enforces. */
 export function tenantBusinessDayStartTime(customDb?: ReturnType<typeof getDatabase>): string {
   const raw = customDb
     ? (customDb.prepare("SELECT value FROM settings WHERE key = 'business_day_start_time'").get() as { value?: unknown } | undefined)?.value
     : getSettingValue('business_day_start_time');
-  if (typeof raw === 'string' && /^(?:0\d|1[01]):[0-5]\d$/.test(raw.trim())) {
-    return raw.trim();
-  }
-  return '00:00';
+  return normalizeBusinessDayStartTime(typeof raw === 'string' ? raw : null);
 }
 
 export function upsertSettings(entries: Record<string, string | undefined | null>): void {
@@ -991,6 +992,73 @@ function isHealthyDatabaseFile(
   }
 }
 
+export const MAX_RETAINED_RESTORE_SAFETY_COPIES = 3;
+
+/** True for the retained copies a successful restore leaves behind as an undo. */
+export function isRestoreSafetyCopyName(fileName: string): boolean {
+  return fileName.startsWith('flo-backup-') && fileName.includes('-pre-restore-') && fileName.endsWith('.db');
+}
+
+/**
+ * A successful restore replaces the live database, so the pre-restore snapshot is
+ * the only copy of what it replaced. It is copied into the managed backup naming
+ * scheme rather than deleted, which makes it appear in listBackups() and makes it
+ * restorable through the same preset-path route as any other managed backup.
+ * Retention is bounded so a long-lived install cannot accumulate copies forever.
+ *
+ * The snapshot is copied rather than renamed so the replacement journal keeps
+ * pointing at a real file: a crash between the committed journal and cleanup must
+ * still be able to roll the live database back from it.
+ */
+export function retainRestoreSafetyCopy(recoveryPath: string, schemaVersion: number): string | null {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const retainedPath = path.join(
+    getBackupDir(),
+    `flo-backup-${timestamp}-pre-restore-v${schemaVersion}.db`,
+  );
+  try {
+    if (!pathEntryExists(recoveryPath)) return null;
+    // The replacement journal snapshots the live file with a raw copy, so the
+    // snapshot carries no _flo_meta stamp and every restore route would refuse
+    // it. Stamp it before copying, so a failure here leaves the recovery copy
+    // exactly where the journal expects it and changes nothing.
+    const snapshotDb = new Database(recoveryPath);
+    try {
+      snapshotDb.pragma('journal_mode = DELETE');
+      snapshotDb.exec('CREATE TABLE IF NOT EXISTS _flo_meta (key TEXT PRIMARY KEY, value TEXT)');
+      snapshotDb.prepare('INSERT OR REPLACE INTO _flo_meta (key, value) VALUES (?, ?)')
+        .run('schema_version', String(schemaVersion));
+      snapshotDb.prepare('INSERT OR REPLACE INTO _flo_meta (key, value) VALUES (?, ?)')
+        .run('backup_created_at', new Date().toISOString());
+      snapshotDb.prepare('INSERT OR REPLACE INTO _flo_meta (key, value) VALUES (?, ?)')
+        .run('app_version', app.getVersion());
+    } finally {
+      snapshotDb.close();
+    }
+    syncFile(recoveryPath);
+    fs.copyFileSync(recoveryPath, retainedPath);
+    syncFile(retainedPath);
+    syncDirectory(getBackupDir());
+  } catch (error) {
+    // Retention is a safety net, never a reason to fail a committed restore.
+    console.warn('[DB] Could not retain the pre-restore safety copy:', error);
+    return null;
+  }
+  try {
+    const existing = fs.readdirSync(getBackupDir())
+      .filter(isRestoreSafetyCopyName)
+      .map((name) => ({ name, mtimeMs: fs.lstatSync(path.join(getBackupDir(), name)).mtimeMs }))
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (const stale of existing.slice(MAX_RETAINED_RESTORE_SAFETY_COPIES)) {
+      fs.unlinkSync(path.join(getBackupDir(), stale.name));
+    }
+    syncDirectory(getBackupDir());
+  } catch (error) {
+    console.warn('[DB] Could not apply pre-restore safety copy retention:', error);
+  }
+  return retainedPath;
+}
+
 function removeOlderReplacementJournals(journals: string[], dbPath: string, backupDir: string): void {
   const backupRoot = path.resolve(backupDir);
   for (const journalPath of journals) {
@@ -1220,6 +1288,11 @@ export function isTelemetryEnabled(): boolean {
 /** Tier 2 diagnostics consent toggle; separate from anonymous telemetry. */
 export function isDiagnosticsConsentEnabled(): boolean {
   return getSettingValue('diagnostics_consent') !== 'false';
+}
+
+/** Automatic transmission of captured diagnostics; off until an operator turns it on. */
+export function isDiagnosticsTransmissionEnabled(): boolean {
+  return getSettingValue('diagnostics_transmission_enabled') === 'true';
 }
 
 /** Kitchen Display System on/off switch. Defaults to enabled. */
@@ -1681,6 +1754,7 @@ type CurrencyResetMenuSnapshot = {
   addonGroups: Record<string, unknown>[];
   addons: Record<string, unknown>[];
   addonGroupProducts: Record<string, unknown>[];
+  categoryAddonGroups: Record<string, unknown>[];
 };
 
 export interface CurrencyResetImpact {
@@ -1718,6 +1792,7 @@ function captureCurrencyResetMenu(dbInstance: Database.Database): CurrencyResetM
     addonGroups: rows('addon_groups'),
     addons: rows('addons'),
     addonGroupProducts: rows('addon_group_product'),
+    categoryAddonGroups: rows('category_addon_groups'),
   };
 }
 
@@ -1762,6 +1837,9 @@ function restoreCurrencyResetMenu(dbInstance: Database.Database, snapshot: Curre
   const addonGroupProducts = snapshot.addonGroupProducts.filter(
     (link) => productIds.has(link.product_id) && addonGroupIds.has(link.addon_group_id),
   );
+  const categoryAddonGroups = snapshot.categoryAddonGroups.filter(
+    (link) => categoryIds.has(link.category_id) && addonGroupIds.has(link.addon_group_id),
+  );
 
   insertSnapshotRows(dbInstance, 'categories', snapshot.categories);
   insertSnapshotRows(dbInstance, 'addon_groups', snapshot.addonGroups);
@@ -1774,6 +1852,7 @@ function restoreCurrencyResetMenu(dbInstance: Database.Database, snapshot: Curre
   }
   insertSnapshotRows(dbInstance, 'addons', addons);
   insertSnapshotRows(dbInstance, 'addon_group_product', addonGroupProducts);
+  insertSnapshotRows(dbInstance, 'category_addon_groups', categoryAddonGroups);
 }
 
 export async function resetDatabaseForCurrencyChange(
@@ -1881,7 +1960,7 @@ export function listBackups(): { fileName: string; path: string; sizeBytes: numb
         path: fullPath,
         sizeBytes: stat.size,
         createdAt: stat.mtime.toISOString(),
-        kind: (fileName.includes('-pre-v') ? 'auto' : 'manual') as 'manual' | 'auto',
+        kind: (fileName.includes('-pre-v') || isRestoreSafetyCopyName(fileName) ? 'auto' : 'manual') as 'manual' | 'auto',
         schemaVersion: readBackupSchemaVersion(fullPath),
       };
     })
@@ -3049,10 +3128,12 @@ export type RestoreOutboxState = {
   cloud: Record<string, unknown>[];
   support: Record<string, unknown>[];
   diagnostics: Record<string, unknown>[];
+  /** Device-local failure log; present on restores that predate it. */
+  local?: Record<string, unknown>[];
 };
 const RESTORE_PROTECTED_SETTING_KEYS = [
   'jwt_secret', 'cloud_api_key', 'cloud_device_secret', 'cloud_pos_hash',
-  'telemetry_enabled', 'diagnostics_consent',
+  'telemetry_enabled', 'diagnostics_consent', 'diagnostics_transmission_enabled',
   'mobile_pairing_code', 'mobile_pairing_code_expires_at',
 ];
 
@@ -3092,11 +3173,15 @@ export function mergeRestoreProtectedSettings(dbInstance: Database.Database, sta
 
 export function captureRestoreOutboxState(dbInstance: Database.Database): RestoreOutboxState {
   const pending = (table: string) => dbInstance.prepare(`SELECT * FROM ${table} WHERE status IN ('pending', 'failed', 'sending')`).all() as Record<string, unknown>[];
-  return { cloud: pending('cloud_sync_outbox'), support: pending('support_ticket_outbox'), diagnostics: pending('store_diagnostics_outbox') };
+  // A SQLite backup copies the whole file, so local_diagnostics travels with it.
+  // Those rows describe the till that produced them, so the receiving device
+  // keeps its own and drops the incoming one.
+  const local = dbInstance.prepare('SELECT * FROM local_diagnostics ORDER BY id ASC').all() as Record<string, unknown>[];
+  return { cloud: pending('cloud_sync_outbox'), support: pending('support_ticket_outbox'), diagnostics: pending('store_diagnostics_outbox'), local };
 }
 
 export function mergeRestoreOutboxState(dbInstance: Database.Database, state: RestoreOutboxState): void {
-  dbInstance.exec('DELETE FROM cloud_sync_outbox; DELETE FROM support_ticket_outbox; DELETE FROM store_diagnostics_outbox');
+  dbInstance.exec('DELETE FROM cloud_sync_outbox; DELETE FROM support_ticket_outbox; DELETE FROM store_diagnostics_outbox; DELETE FROM local_diagnostics');
   const cloud = dbInstance.prepare(`INSERT OR REPLACE INTO cloud_sync_outbox
     (id, event_type, entity_type, entity_id, payload, status, attempt_count, next_attempt_at, last_error, delivered_at, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -3109,6 +3194,12 @@ export function mergeRestoreOutboxState(dbInstance: Database.Database, state: Re
     (event_id, payload, status, attempt_count, next_attempt_at, last_error, created_at, updated_at, delivered_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   for (const row of state.diagnostics) diagnostics.run(row.event_id, row.payload, row.status === 'sending' ? 'failed' : row.status, row.attempt_count || 0, row.next_attempt_at || now(), row.last_error || null, row.created_at || now(), row.updated_at || now(), row.delivered_at || null);
+  const local = dbInstance.prepare(`INSERT INTO local_diagnostics
+    (event_code, severity, error_class, signature, summary, metadata_json, occurred_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+  for (const row of state.local || []) local.run(row.event_code, row.severity, row.error_class, row.signature, row.summary, row.metadata_json || null, row.occurred_at, row.created_at);
+  // Re-cap in case this device was already at the limit before the restore.
+  dbInstance.prepare('DELETE FROM local_diagnostics WHERE id NOT IN (SELECT id FROM local_diagnostics ORDER BY id DESC LIMIT ?)').run(200);
 }
 
 export function captureKdsEnabledSetting(dbInstance: Database.Database): KdsEnabledSettingState {
@@ -3415,14 +3506,30 @@ export function restoreBackup(backupPath: string, forceDirect: boolean = false, 
   let metadataStampPresent = false;
   let pragmaVersion = 0;
   let backupDb: Database.Database | undefined;
+  let unreadableSource = false;
   try {
     backupDb = new Database(backupPath, { readonly: true, fileMustExist: true });
     const metaRow = backupDb.prepare(`SELECT value FROM _flo_meta WHERE key = 'schema_version'`).get() as { value: string } | undefined;
     metadataStampPresent = Boolean(metaRow);
     metadataVersion = metaRow ? parseCanonicalSchemaVersion(metaRow.value) ?? 0 : 0;
     pragmaVersion = Number(backupDb.pragma('user_version', { simple: true }));
+  } catch {
+    // A file that is not a readable SQLite database (truncated, corrupt, or
+    // simply not a database at all) must be refused, never applied.
+    unreadableSource = true;
   } finally {
     backupDb?.close();
+  }
+
+  if (unreadableSource) {
+    return {
+      success: false,
+      mode: forceDirect ? 'direct' : 'data_only',
+      backupSchemaVersion: 0,
+      currentSchemaVersion: getCurrentSchemaVersion(),
+      tablesRestored: 0,
+      error: 'Restore source is not a readable Flo database file',
+    };
   }
 
   // Determine schema version from metadata stamp or SQLite user_version pragma.
@@ -3539,6 +3646,9 @@ export function restoreBackup(backupPath: string, forceDirect: boolean = false, 
         baselineForeignKeyViolations: [...baselineForeignKeyViolations],
         driveInvalidationRequired: true,
       });
+      // The replacement is durable; keep the snapshot of what it replaced so a
+      // customer who restores the wrong file can undo it.
+      retainRestoreSafetyCopy(recoveryPath, currentVersion);
       return {
         success: true,
         mode: 'direct',
@@ -3888,6 +3998,7 @@ function dataOnlyRestore(
       throw journalError;
     }
     replacementCommitted = true;
+    retainRestoreSafetyCopy(replacementJournal.recoveryPath, currentVersion);
     try {
       currentDb.exec('DETACH DATABASE _restore_src');
       attached = false;
@@ -4301,7 +4412,7 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
       }
 
       const tenantCountryRow = db.prepare("SELECT value FROM settings WHERE key = 'country'").get() as any;
-      // Deliberate exception to "no India default" (docs/business-decisions.md):
+      // Deliberate exception to "no India default" (docs/reference/product-invariants.md):
       // this is a one-time best-effort cleanup of pre-existing customer phone
       // records on an upgrading install, most of which predate multi-country
       // support and were Indian. Not a live store's regional identity.
@@ -5852,7 +5963,7 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
     version: 82,
     name: 'add_order_audit_log',
     up: () => {
-      // Append-only actor log for order/item mutations (docs/business-decisions.md).
+      // Append-only actor log for order/item mutations (docs/reference/product-invariants.md).
       db.exec(`
         CREATE TABLE IF NOT EXISTS order_audit_log (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -6971,6 +7082,16 @@ function createSchema(): void {
       PRIMARY KEY (product_id, addon_group_id)
     );
 
+    CREATE TABLE IF NOT EXISTS category_addon_groups (
+      category_id TEXT NOT NULL,
+      addon_group_id TEXT NOT NULL,
+      PRIMARY KEY (category_id, addon_group_id),
+      FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE,
+      FOREIGN KEY (addon_group_id) REFERENCES addon_groups(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_category_addon_groups_category ON category_addon_groups(category_id);
+    CREATE INDEX IF NOT EXISTS idx_category_addon_groups_group ON category_addon_groups(addon_group_id);
+
     CREATE TABLE IF NOT EXISTS kitchen_stations (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -7055,6 +7176,7 @@ function createSchema(): void {
       customer_id TEXT,
       user_id TEXT,
       type TEXT DEFAULT 'takeaway',
+      delivery_address TEXT DEFAULT NULL,
       guest_count INTEGER,
       special_instructions TEXT,
       packaging_charge REAL DEFAULT 0,
@@ -7431,7 +7553,7 @@ function createWhatsAppSchema(): void {
       phone_e164 TEXT NOT NULL,
       direction TEXT NOT NULL CHECK (direction IN ('outbound','inbound')),
       kind TEXT NOT NULL DEFAULT 'manual_reply'
-        CHECK (kind IN ('bill_receipt','manual_reply','auto_followup')),
+        CHECK (kind IN ('bill_receipt','manual_reply','auto_followup','z_report')),
       status TEXT NOT NULL DEFAULT 'queued'
         CHECK (status IN ('queued','seen','typing','sent','delivered','read','failed')),
       body TEXT NOT NULL,
@@ -7501,7 +7623,7 @@ function seedInstallDefaults(): void {
   insert('business_name', '');
   insert('business_type', 'restaurant');
   // country/currency/currency_symbol/timezone are deliberately not seeded here:
-  // they come only from the signup wizard (docs/business-decisions.md,
+  // they come only from the signup wizard (docs/reference/product-invariants.md,
   // "Regional settings come from signup, never from a fallback"). Until setup
   // completes, resolveRegionalSnapshot() throws RegionalNotConfiguredError
   // rather than a caller substituting a default country.
@@ -7537,6 +7659,7 @@ function seedInstallDefaults(): void {
   insert('telemetry_scope', 'usage_stats,country,app_version,platform,session_duration,feature_usage,error_diagnostics');
   insert('diagnostics_consent', 'true');
   insert('kds_enabled', 'true');
+  insert('require_kitchen_delivered_before_settlement', 'false');
   insert('server_app_enabled', 'true');
   insert('kot_printing_enabled', 'true');
   insert('server_app_bill_printing_enabled', 'false');
@@ -7550,6 +7673,7 @@ function seedInstallDefaults(): void {
   insert('bill_show_tax_breakdown', 'true');
   insert('bill_show_customer_name', 'true');
   insert('bill_show_customer_phone', 'true');
+  insert('bill_delivery_show_customer_phone_always', 'true');
   insert('bill_show_table_number', 'true');
   insert('order_number_prefix', 'ORD');
   insert('order_number_include_date', 'true');
@@ -7820,7 +7944,7 @@ export function now(): string {
   return new Date().toISOString().replace('T', ' ').replace(/\..*$/, '');
 }
 
-/** Records who performed an order/item mutation (docs/business-decisions.md). */
+/** Records who performed an order/item mutation (docs/reference/product-invariants.md). */
 export function recordOrderAudit(
   db: ReturnType<typeof getDatabase>,
   params: { orderId: number | string; orderItemId?: number | string | null; actorUserId: string; action: string; details?: Record<string, unknown> },
@@ -7850,88 +7974,19 @@ export function utcTodayDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function parseStartTimeOffsetMs(startTime: string = '00:00'): number {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(startTime.trim());
-  if (!match) return 0;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  return (hours * 60 + minutes) * 60 * 1000;
-}
+// The business-day rule lives in shared/business-date.ts so the renderer cannot
+// restate it. These re-exports keep the existing importer surface for one
+// release: every remaining import of a business-date symbol from this module is
+// visible in review instead of hidden behind a silent copy. Delete them and
+// repoint the importers in a follow-on, or the move is cosmetic.
+export { dayBoundsInTimezone, utcDayBounds };
 
-function calendarDateInTimezone(instant: Date, timezone: string): string {
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(instant);
-    const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
-    return `${get('year')}-${get('month')}-${get('day')}`;
-  } catch {
-    return instant.toISOString().slice(0, 10);
-  }
-}
-
-/** Return the business date represented by an instant in an IANA timezone with an optional day start offset. */
+/** Deprecated positional alias of `businessDateForInstant`, kept so the existing
+ *  `localDateInTimezone(instant, timezone, startTime)` importers keep their exact
+ *  signature for one release. A bare rename would have changed the argument order
+ *  of a live export without any of those callers changing. */
 export function localDateInTimezone(instant: Date, timezone: string, startTime: string = '00:00'): string {
-  if (parseStartTimeOffsetMs(startTime) === 0) return calendarDateInTimezone(instant, timezone);
-
-  const calendarDate = calendarDateInTimezone(instant, timezone);
-  const [start] = dayBoundsInTimezone(calendarDate, timezone, startTime);
-  if (instant >= parseDbTimestamp(start)) return calendarDate;
-
-  const [year, month, day] = calendarDate.split('-').map(Number);
-  return new Date(Date.UTC(year, month - 1, day - 1)).toISOString().slice(0, 10);
-}
-
-function timezoneOffsetMilliseconds(instant: Date, timezone: string): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(instant);
-  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
-  return Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second')) - instant.getTime();
-}
-
-/** Half-open UTC ranges `[start, end)` for one date in the tenant timezone with an optional day start offset. */
-export function dayBoundsInTimezone(date: string, timezone: string, startTime: string = '00:00'): [string, string] {
-  const [y, m, d] = date.split('-').map(Number);
-  const format = (instant: Date) => instant.toISOString().replace('T', ' ').replace(/\..*$/, '');
-  const offsetMinutes = parseStartTimeOffsetMs(startTime) / 60000;
-  const startHour = Math.floor(offsetMinutes / 60);
-  const startMinute = offsetMinutes % 60;
-  try {
-    const toUtc = (localWallTime: number): Date => {
-      let instant = new Date(localWallTime);
-      for (let attempt = 0; attempt < 3; attempt++) {
-        instant = new Date(localWallTime - timezoneOffsetMilliseconds(instant, timezone));
-      }
-      return instant;
-    };
-    return [
-      format(toUtc(Date.UTC(y, m - 1, d, startHour, startMinute))),
-      format(toUtc(Date.UTC(y, m - 1, d + 1, startHour, startMinute))),
-    ];
-  } catch {
-    return utcDayBounds(date, startTime);
-  }
-}
-
-/** Half-open UTC range strings `[start, end)` for a UTC calendar date with an optional day start offset. */
-export function utcDayBounds(date: string, startTime: string = '00:00'): [string, string] {
-  const [y, m, d] = date.split('-').map(Number);
-  const offsetMs = parseStartTimeOffsetMs(startTime);
-  const start = new Date(Date.UTC(y, m - 1, d, 0, 0, 0) + offsetMs);
-  const end = new Date(start.getTime() + 24 * 3600 * 1000);
-  const fmt = (dt: Date) => dt.toISOString().replace('T', ' ').replace(/\..*$/, '');
-  return [fmt(start), fmt(end)];
+  return businessDateForInstant({ instant, timezone, startTime });
 }
 
 /** Verify a user PIN against the stored pin_hash. */

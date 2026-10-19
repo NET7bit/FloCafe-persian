@@ -46,7 +46,10 @@ async function run() {
   activeResponse.status = () => activeResponse;
   activeResponse.json = () => undefined;
   let activeNextCalled = false;
-  databaseMaintenanceMiddleware({ path: '/api/test' } as any, activeResponse as any, () => { activeNextCalled = true; });
+  // A real Express request always carries a method; the FK gate treats an
+  // unclassified write as fail-closed, so an incomplete fixture would be
+  // rejected as a write instead of entering as the read this assertion means.
+  databaseMaintenanceMiddleware({ path: '/api/test', method: 'GET' } as any, activeResponse as any, () => { activeNextCalled = true; });
   assert.equal(activeNextCalled, true, 'normal requests enter while maintenance is idle');
 
   let maintenanceStarted = false;

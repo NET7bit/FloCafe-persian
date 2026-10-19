@@ -173,6 +173,17 @@ function missingUpstreamGroups(db: any): string[] {
   return missing;
 }
 
+/** The shared fresh-install schema now ships the v93-v98 objects itself, so a
+ *  fixture opened today is no longer the pre-v93 database these scenarios must
+ *  start from. Strip them back out so the migration chain (not `createSchema()`)
+ *  is what brings them back — that is the behaviour under test. */
+function stripUpstreamSchemaGifts(db: any): void {
+  db.exec('DROP TABLE IF EXISTS category_addon_groups;');
+  if (hasColumn(db, 'orders', 'delivery_address')) db.exec('ALTER TABLE orders DROP COLUMN delivery_address;');
+  db.exec('DROP TABLE IF EXISTS whatsapp_messages;');
+  db.exec(WHATSAPP_OLD_DDL);
+}
+
 function assertConverged(db: any, label: string): void {
   eq(uv(db), TAIL, `${label}: reaches the registry tail`);
   const missing = missingUpstreamGroups(db);
@@ -197,6 +208,7 @@ function scenarioUpstreamV92(): void {
   resetFile();
   setRegistry(sharedVersions());
   const fixture = open();
+  stripUpstreamSchemaGifts(fixture);
   eq(uv(fixture), SHARED_MAX, 'the capped chain stops at v92');
   for (const table of UPSTREAM_TABLES) ok(!tableExists(fixture, table), `v92 fixture lacks ${table}`);
   ok(!acceptsZReport(fixture), "v92 fixture rejects 'z_report' (pre-v96 CHECK)");
@@ -229,6 +241,7 @@ function scenarioLegacyForkLineages(): void {
     resetFile();
     setRegistry(legacyForkVersions(FORK_NEW[oldVersion]));
     const fixture = open();
+  stripUpstreamSchemaGifts(fixture);
     fixture.pragma(`user_version = ${oldVersion}`);
     eq(uv(fixture), oldVersion, `legacy fork reports v${oldVersion}`);
     ok(!tableExists(fixture, 'role_permission_overrides'), `legacy fork v${oldVersion} lacks the upstream permission tables`);
@@ -720,7 +733,9 @@ function scenarioUnifiedCatchUpRollback(): void {
   resetFile();
   setRegistry(legacyForkVersions(1012));
   const fixture = open();
+  stripUpstreamSchemaGifts(fixture);
   fixture.exec(`
+    DROP TABLE IF EXISTS category_addon_groups;
     CREATE TABLE category_addon_groups (
       category_id TEXT NOT NULL,
       addon_group_id TEXT NOT NULL,
@@ -733,6 +748,9 @@ function scenarioUnifiedCatchUpRollback(): void {
   fixture.pragma('user_version = 104');
   ok(!tableExists(fixture, 'role_permission_overrides'), 'setup: the permission tables are absent before the catch-up');
   ok(!hasColumn(fixture, 'orders', 'delivery_address'), 'setup: orders.delivery_address is absent before the catch-up');
+  // The shared install defaults now seed this setting, so remove it first: only
+  // the catch-up's own write may put it back (and roll it back again).
+  fixture.prepare("DELETE FROM settings WHERE key = 'bill_delivery_show_customer_phone_always'").run();
   close();
 
   restoreRegistry();

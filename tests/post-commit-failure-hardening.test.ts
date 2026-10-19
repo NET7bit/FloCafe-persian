@@ -112,6 +112,15 @@ async function run() {
     const app = createApp({ '/api/database': databaseRoutes, '/api/db-tools': databaseToolsRoutes });
     assert(getDbPath().startsWith(testDir), 'setup: the test database lives inside the temp directory');
 
+    // Route authorization reads the live users table, so an operation that wipes
+    // and re-seeds the database removes the row the suite token points at and
+    // every later request would be a 403 instead of a 200. The seeding id is
+    // deterministic, so re-seeding keeps the same bearer token valid.
+    function reseedOwner(): void {
+      seedOwnerUser(getDatabase());
+      setMasterPin(PIN);
+    }
+
     const originalComplete = googleDrive.completeDatabaseRestore;
     const originalRelease = googleDrive.releaseDatabaseRestore;
     const originalPragma = RealDatabase.prototype.pragma;
@@ -133,7 +142,8 @@ async function run() {
       };
       try {
         getDatabase().prepare('DELETE FROM settings WHERE key = ?').run('p34_t1');
-        const r = await request(app).post('/api/database/import').set(owner.authHeader)
+      reseedOwner();
+      const r = await request(app).post('/api/database/import').set(owner.authHeader)
           .send(importPayload({ settings: [{ key: 'p34_t1', value: 'committed', updated_at: new Date().toISOString() }] }));
         assertEqual(r.status, 200, 'T1: a foreign_keys restore failure after COMMIT must NOT become HTTP 500');
         assertEqual(r.body?.success, true, 'T1: the committed import is reported as success');
@@ -149,6 +159,7 @@ async function run() {
     // T2 — currency-reset: post-commit cleanup failure must not be a false
     //      "Currency reset failed" (the currency change has already committed).
     // ═══════════════════════════════════════════════════════════════════════
+    reseedOwner();
     {
       const current = settingValue('currency') || '';
       const target = current === 'USD' ? 'EUR' : 'USD';
@@ -168,6 +179,7 @@ async function run() {
     // T3 — database-tools `/initialize`: post-commit cleanup failure must not
     //      become a false "Initialize failed".
     // ═══════════════════════════════════════════════════════════════════════
+    reseedOwner();
     {
       googleDrive.completeDatabaseRestore = () => { throw new Error('INJECTED: post-commit cleanup failure'); };
       try {
@@ -196,7 +208,7 @@ async function run() {
       try {
         const restore = ipcHandlers.get('restore-backup');
         assert(typeof restore === 'function', `${label}: restore-backup IPC handler is registered`);
-        return await restore({ sender: {} }, PIN, backupPath);
+        return await restore({ sender: { getURL: () => 'http://localhost:3001/' } }, PIN, backupPath);
       } finally {
         dbModule.getCurrentSchemaVersion = originalGetVersion;
         googleDrive.completeDatabaseRestore = originalComplete;
@@ -223,7 +235,7 @@ async function run() {
       try {
         const initialize = ipcHandlers.get('db-initialize');
         assert(typeof initialize === 'function', 'T6: db-initialize IPC handler is registered');
-        const r = await initialize({ sender: {} }, { pin: PIN, confirmationPhrase: 'INITIALIZE' });
+        const r = await initialize({ sender: { getURL: () => 'http://localhost:3001/' } }, { pin: PIN, confirmationPhrase: 'INITIALIZE' });
         assertEqual(r?.success, true, 'T6: a post-commit cleanup failure must not report success:false for a committed initialize');
         assertEqual(r?.cleanupPending, true, 'T6: cleanupPending is surfaced');
         assert(typeof r?.backupPath === 'string' && r.backupPath.length > 0, 'T6: the initialize result still carries backupPath');
@@ -236,13 +248,14 @@ async function run() {
     // T7 — releaseDatabaseRestore() failure must not convert a committed
     //      success into a failure (nor a lost IPC return value).
     // ═══════════════════════════════════════════════════════════════════════
+    reseedOwner();
     {
       googleDrive.releaseDatabaseRestore = () => { throw new Error('INJECTED: release failure'); };
       let threw: unknown = null;
       let r: any = null;
       try {
         const initialize = ipcHandlers.get('db-initialize');
-        r = await initialize({ sender: {} }, { pin: PIN, confirmationPhrase: 'INITIALIZE' });
+        r = await initialize({ sender: { getURL: () => 'http://localhost:3001/' } }, { pin: PIN, confirmationPhrase: 'INITIALIZE' });
       } catch (error) { threw = error; } finally {
         googleDrive.releaseDatabaseRestore = originalRelease;
       }
@@ -250,6 +263,7 @@ async function run() {
       assertEqual(r?.success, true, 'T7: a release failure must not turn a committed initialize into success:false');
       assertEqual(r?.cleanupPending, false, 'T7: a release failure is not a cleanup failure (cleanupPending stays false)');
     }
+    reseedOwner();
     {
       googleDrive.releaseDatabaseRestore = () => { throw new Error('INJECTED: release failure'); };
       let threw: unknown = null;
@@ -269,6 +283,7 @@ async function run() {
     // T8 — a genuine PRE-commit failure must still fail correctly (guard
     //      against over-correction).
     // ═══════════════════════════════════════════════════════════════════════
+    reseedOwner();
     {
       const before = settingValue('currency') || '';
       const target = before === 'USD' ? 'EUR' : 'USD';
@@ -304,6 +319,7 @@ async function run() {
       assertEqual(r.body?.cleanupPending, false, 'T9: no cleanup is pending on a clean success');
     }
     {
+    reseedOwner();
       getDatabase().prepare('DELETE FROM settings WHERE key = ?').run('p34_t9');
       const r = await request(app).post('/api/database/import').set(owner.authHeader)
         .send(importPayload({ settings: [{ key: 'p34_t9', value: 'ok', updated_at: new Date().toISOString() }] }));
@@ -317,6 +333,7 @@ async function run() {
     // T10 — cleanupPending contract: the field exists on every success path
     //       that supports it, and a real cleanup-pending result propagates.
     // ═══════════════════════════════════════════════════════════════════════
+    reseedOwner();
     {
       googleDrive.completeDatabaseRestore = () => ({ committed: true, cleanupPending: true });
       try {

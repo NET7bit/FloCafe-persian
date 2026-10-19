@@ -9,6 +9,7 @@ import type { Table, Customer, Order, OrderItem } from '@/lib/types';
 import FloorplanEditor from '@/components/tables/FloorplanEditor';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/auth';
+import { tenantCan } from '@/lib/permissions';
 import { countryName } from '@/lib/countries';
 import { parsePhone, dialCodeFor } from '@/lib/phone';
 import { useTranslations, type AppConfig } from 'use-intl';
@@ -206,7 +207,8 @@ export default function TablesPage() {
   const router = useRouter();
   const tOrders = useTranslations('orders');
   const { currentTenant } = useAuthStore();
-  const canManageTables = currentTenant?.role === 'owner' || currentTenant?.role === 'manager';
+  const canManageTables = tenantCan(currentTenant, 'tables.manage');
+  const canReadOrders = tenantCan(currentTenant, 'orders.read');
   const [tables, setTables] = useState<Table[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -257,6 +259,8 @@ export default function TablesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutMode]);
 
+  const displaysOrderDetails = canReadOrders && showDetails;
+
   // Clear stale order list immediately when details panel is hidden.
   const [syncedShowDetails, setSyncedShowDetails] = useState(showDetails);
   if (showDetails !== syncedShowDetails) {
@@ -265,7 +269,7 @@ export default function TablesPage() {
   }
 
   useEffect(() => {
-    if (view !== 'plan' && !showDetails) return;
+    if (!canReadOrders || (view !== 'plan' && !showDetails)) return;
     const fetchOrders = () => {
       api.get('/orders', { params: { status: 'pending,preparing,ready,served', per_page: 500 } })
         .then(({ data }) => setOrders(data.orders || []))
@@ -276,12 +280,12 @@ export default function TablesPage() {
     fetchOrders();
     const interval = setInterval(fetchOrders, 10000);
     return () => clearInterval(interval);
-  }, [showDetails, layoutMode, view]);
+  }, [canReadOrders, showDetails, layoutMode, view]);
 
   // Group active orders by table_id — always built so both the floorplan
   // editor and the list view can read active orders per table.
   const ordersByTable = new Map<string, Order[]>();
-  for (const order of orders) {
+  for (const order of canReadOrders ? orders : []) {
     if (!order.table_id) continue;
     const tableKey = String(order.table_id);
     const existing = ordersByTable.get(tableKey);
@@ -429,7 +433,7 @@ export default function TablesPage() {
               {tTables('backToPlan')}
             </Button>
           )}
-          {view === 'list' && (
+          {view === 'list' && canReadOrders && (
             <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -458,7 +462,7 @@ export default function TablesPage() {
           ordersByTable={ordersByTable}
           onSaved={fetchTables}
           onReserve={(tb) => setReservingTable(tb)}
-          onViewOrder={() => router.push('/orders')}
+          onViewOrder={canReadOrders ? () => router.push('/orders') : undefined}
         />
       </div>
 
@@ -481,7 +485,7 @@ export default function TablesPage() {
         </div>
       )}
 
-      {view === 'list' ? (showDetails ? (
+      {view === 'list' ? (displaysOrderDetails ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {visibleTables.map((table) => {
             const tableOrders = ordersByTable.get(table.id) || [];
@@ -560,29 +564,29 @@ export default function TablesPage() {
                 )}
 
                 {/* Actions */}
-                <div className="px-4 py-2 border-t border-border flex justify-end gap-2">
-                  {canManageTables && (
+                {canManageTables && (
+                  <div className="px-4 py-2 border-t border-border flex justify-end gap-2">
                     <button onClick={() => openEdit(table)} className="text-xs text-brand hover:text-brand-hover font-medium inline-flex items-center gap-1">
                       <Pencil size={12} /> {tTables('editTable')}
                     </button>
-                  )}
-                  {(table.status === 'occupied' || table.status === 'reserved') && (
-                    <button onClick={() => updateStatus(table.id, 'available')}
-                      className="text-xs text-brand hover:text-brand-hover font-medium">
-                      {tTables('markAvailable')}
+                    {(table.status === 'occupied' || table.status === 'reserved') && (
+                      <button onClick={() => updateStatus(table.id, 'available')}
+                        className="text-xs text-brand hover:text-brand-hover font-medium">
+                        {tTables('markAvailable')}
+                      </button>
+                    )}
+                    {table.status === 'available' && (
+                      <button onClick={() => setReservingTable(table)}
+                        className="text-xs text-yellow-600 hover:text-yellow-700 font-medium">
+                        {tTables('reserve')}
+                      </button>
+                    )}
+                    <button onClick={() => toggleActive(table)}
+                      className={`text-xs font-medium flex items-center gap-1 ${!table.is_active ? 'text-green-600 hover:text-green-700' : 'text-red-500 hover:text-red-700'}`}>
+                      {!table.is_active ? <><RotateCcw size={12} /> {tTables('reactivate')}</> : tTables('deactivate')}
                     </button>
-                  )}
-                  {table.status === 'available' && (
-                    <button onClick={() => setReservingTable(table)}
-                      className="text-xs text-yellow-600 hover:text-yellow-700 font-medium">
-                      {tTables('reserve')}
-                    </button>
-                  )}
-                  <button onClick={() => toggleActive(table)}
-                    className={`text-xs font-medium flex items-center gap-1 ${!table.is_active ? 'text-green-600 hover:text-green-700' : 'text-red-500 hover:text-red-700'}`}>
-                    {!table.is_active ? <><RotateCcw size={12} /> {tTables('reactivate')}</> : tTables('deactivate')}
-                  </button>
-                </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -607,27 +611,29 @@ export default function TablesPage() {
                 <p className="text-xs text-yellow-600 mt-0.5"><Ltr>{table.reservation_customer_phone}</Ltr></p>
               )}
 
-              {(table.status === 'occupied' || table.status === 'reserved') && (
-                <button onClick={() => updateStatus(table.id, 'available')}
-                  className="mt-3 text-xs text-brand hover:text-brand-hover font-medium">
-                  {tTables('markAvailable')}
-                </button>
-              )}
-              {table.status === 'available' && (
-                <button onClick={() => setReservingTable(table)}
-                  className="mt-3 text-xs text-yellow-600 hover:text-yellow-700 font-medium">
-                  {tTables('reserve')}
-                </button>
-              )}
               {canManageTables && (
-                <button onClick={() => openEdit(table)} className="mt-2 mx-auto text-xs text-brand hover:text-brand-hover font-medium flex items-center gap-1">
-                  <Pencil size={12} /> {tTables('editTable')}
-                </button>
+                <>
+                  {(table.status === 'occupied' || table.status === 'reserved') && (
+                    <button onClick={() => updateStatus(table.id, 'available')}
+                      className="mt-3 text-xs text-brand hover:text-brand-hover font-medium">
+                      {tTables('markAvailable')}
+                    </button>
+                  )}
+                  {table.status === 'available' && (
+                    <button onClick={() => setReservingTable(table)}
+                      className="mt-3 text-xs text-yellow-600 hover:text-yellow-700 font-medium">
+                      {tTables('reserve')}
+                    </button>
+                  )}
+                  <button onClick={() => openEdit(table)} className="mt-2 mx-auto text-xs text-brand hover:text-brand-hover font-medium flex items-center gap-1">
+                    <Pencil size={12} /> {tTables('editTable')}
+                  </button>
+                  <button onClick={() => toggleActive(table)}
+                    className={`mt-2 block mx-auto text-xs font-medium ${!table.is_active ? 'text-green-600 hover:text-green-700' : 'text-red-500 hover:text-red-700'}`}>
+                    {!table.is_active ? tTables('reactivate') : tTables('deactivate')}
+                  </button>
+                </>
               )}
-              <button onClick={() => toggleActive(table)}
-                className={`mt-2 block mx-auto text-xs font-medium ${!table.is_active ? 'text-green-600 hover:text-green-700' : 'text-red-500 hover:text-red-700'}`}>
-                {!table.is_active ? tTables('reactivate') : tTables('deactivate')}
-              </button>
             </div>
           ))}
         </div>

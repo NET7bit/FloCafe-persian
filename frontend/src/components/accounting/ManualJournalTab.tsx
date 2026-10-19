@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/store/auth';
 import { ROLE_ACCESS, hasRole } from '@shared/role-permissions';
-import { businessDateInTimezone } from '@/lib/business-date';
+import { businessDateForInstant } from '@shared/business-date';
 import {
   accountingErrorMessage,
   createManualJournal,
@@ -49,10 +49,11 @@ export default function ManualJournalTab({ periods }: { periods: FiscalPeriod[] 
   const { currentTenant } = useAuthStore();
   const canPost = hasRole(currentTenant?.role, ROLE_ACCESS.owner);
 
-  const businessDate = businessDateInTimezone(
-    currentTenant?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-    currentTenant?.business_day_start_time,
-  );
+  const businessDate = businessDateForInstant({
+    instant: new Date(),
+    timezone: currentTenant?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+    startTime: currentTenant?.business_day_start_time,
+  });
 
   const [accounts, setAccounts] = useState<AccountingAccount[]>([]);
   const [entryDate, setEntryDate] = useState(businessDate);

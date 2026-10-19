@@ -5,7 +5,7 @@ import { useTranslations } from 'use-intl';
 import { BookOpen, FileBarChart, Scale, ShieldCheck, CalendarClock, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/store/auth';
-import { businessDateInTimezone } from '@/lib/business-date';
+import { businessDateForInstant } from '@shared/business-date';
 import {
   accountingErrorMessage,
   fetchIntegrity,
@@ -74,10 +74,11 @@ export default function OverviewTab({ onNavigate }: OverviewTabProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey]);
 
-  const businessDate = businessDateInTimezone(
-    currentTenant?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-    currentTenant?.business_day_start_time,
-  );
+  const businessDate = businessDateForInstant({
+    instant: new Date(),
+    timezone: currentTenant?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+    startTime: currentTenant?.business_day_start_time,
+  });
 
   const currentPeriod = data?.periods.find(
     (period) => period.start_date <= businessDate && period.end_date >= businessDate,

@@ -4,7 +4,7 @@ import { useTranslations } from 'use-intl';
 import { Button } from '@/components/ui/button';
 import { Ltr } from '@/components/layout/Ltr';
 import { useAuthStore } from '@/store/auth';
-import { businessDateInTimezone } from '@/lib/business-date';
+import { businessDateForInstant } from '@shared/business-date';
 import { isDateInClosedPeriod } from '@/lib/fiscal-periods';
 import type { FiscalPeriod } from '@/lib/accounting';
 import { AccountingEmpty, AccountingError, AccountingLoading, StatusBadge } from './shared';
@@ -27,10 +27,11 @@ export default function FiscalPeriodsTab({ periods, loading, error, onRefresh }:
   const tCommon = useTranslations('common');
   const { currentTenant } = useAuthStore();
 
-  const businessDate = businessDateInTimezone(
-    currentTenant?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-    currentTenant?.business_day_start_time,
-  );
+  const businessDate = businessDateForInstant({
+    instant: new Date(),
+    timezone: currentTenant?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+    startTime: currentTenant?.business_day_start_time,
+  });
 
   const currentPeriod = periods.find(
     (period) => period.start_date <= businessDate && period.end_date >= businessDate,

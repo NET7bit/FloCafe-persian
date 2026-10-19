@@ -22,6 +22,11 @@ const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'flo-country-provenance-')
 let stubLocale = 'es-DO';
 let stubLocaleCountry = 'DO';
 
+// SEC-02 wraps cloud_api_key in a `flosec1:` envelope produced by OS-backed
+// safeStorage. Registration persists that key, so the stub has to provide a
+// working (if fake) round-trip instead of leaving safeStorage undefined.
+const ENC_MARKER = 'enc(';
+
 Module._load = function (request: string, parent: unknown, isMain: boolean) {
   if (request === 'electron') {
     return {
@@ -31,6 +36,16 @@ Module._load = function (request: string, parent: unknown, isMain: boolean) {
         getVersion: () => 'test',
         getLocale: () => stubLocale,
         getLocaleCountryCode: () => stubLocaleCountry,
+      },
+      safeStorage: {
+        isEncryptionAvailable: () => true,
+        getSelectedStorageBackend: () => 'dpapi',
+        encryptString: (value: string) => Buffer.from(`${ENC_MARKER}${value})`, 'utf8'),
+        decryptString: (buffer: Buffer) => {
+          const text = buffer.toString('utf8');
+          if (!text.startsWith(ENC_MARKER) || !text.endsWith(')')) throw new Error('decrypt failed');
+          return text.slice(ENC_MARKER.length, -1);
+        },
       },
     };
   }
@@ -192,10 +207,22 @@ async function run() {
     clearSettings('country_confirmed_at', 'onboarding_completed');
     // Suppresses the post-registration welcome email so this test exercises the
     // register call and nothing else.
-    setSettings({ country: 'IN', cloud_sync_enabled: '1', cloud_verification_welcome_requested: '1' });
+    setSettings({
+      country: 'IN',
+      currency: ' usd ',
+      cloud_sync_enabled: '1',
+      cloud_verification_welcome_requested: '1',
+    });
     await cloudSync.register();
     assertEqual(body?.business?.country, null, 'an unconfirmed install registers without a country');
+    assertEqual(body?.business?.currency, 'USD', 'registration normalizes the configured currency to an ISO code');
     assertEqual(body?.business?.country_source, 'default', 'the payload says the value is a default');
+    assertEqual(body?.run_mode, 'packaged', 'the payload reports how the install is running');
+    assert(
+      ['github', 'ms_store', 'mac_app_store', 'snap', 'appimage', 'flatpak', 'deb', 'rpm', 'linux_package', 'dev']
+        .includes(String(body?.install_source)),
+      'the payload reports a documented install source'
+    );
     assertEqual(body?.business?.os_country, 'DO', 'the payload carries the OS region');
     assertEqual(body?.business?.os_locale, 'es-DO', 'the payload carries the OS locale');
     assert(
@@ -208,6 +235,30 @@ async function run() {
     await cloudSync.register();
     assertEqual(body?.business?.country, 'DO', 'a confirmed country is registered');
     assertEqual(body?.business?.country_source, 'user', 'the payload says a human chose it');
+
+    setSettings({ currency: '$' });
+    body = null;
+    await cloudSync.register();
+    assert(
+      !Object.prototype.hasOwnProperty.call(body?.business ?? {}, 'currency'),
+      'a currency symbol is omitted from registration',
+    );
+
+    setSettings({ currency: 'ZZZ' });
+    body = null;
+    await cloudSync.register();
+    assert(
+      !Object.prototype.hasOwnProperty.call(body?.business ?? {}, 'currency'),
+      'an unsupported currency code is omitted from registration',
+    );
+
+    clearSettings('currency');
+    body = null;
+    await cloudSync.register();
+    assert(
+      !Object.prototype.hasOwnProperty.call(body?.business ?? {}, 'currency'),
+      'a missing currency is omitted instead of being guessed from country or locale',
+    );
 
     // The shared assertion helpers tally failures instead of throwing, so a
     // test that never reads the tally always reports success.

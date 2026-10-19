@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getDatabase } from '../db';
-import { requireRole } from '../middleware/security';
-import { ROLE_ACCESS } from '../../shared/role-permissions';
+import { requirePermission } from '../services/authorization';
 import {
   createSupplier,
   getSupplier,
@@ -27,7 +26,7 @@ function queryString(value: unknown, field: string): string | undefined {
   return value.trim();
 }
 
-router.get('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const includeInactive = req.query.include_inactive === 'true' || req.query.include_inactive === '1';
     const search = queryString(req.query.search, 'search');
@@ -38,7 +37,7 @@ router.get('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Re
   }
 });
 
-router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.post('/', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const actorId = String((req as Request & { user?: { userId?: string } }).user?.userId || '');
@@ -60,7 +59,7 @@ router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: R
   }
 });
 
-router.get('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/:id', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const supplier = getSupplier(getDatabase(), String(req.params.id));
     res.json({ supplier });
@@ -69,7 +68,7 @@ router.get('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res:
   }
 });
 
-router.put('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.put('/:id', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const supplier = updateSupplier(getDatabase(), String(req.params.id), {
@@ -89,7 +88,7 @@ router.put('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res:
   }
 });
 
-router.delete('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.delete('/:id', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     softDeleteSupplier(getDatabase(), String(req.params.id));
     res.json({ success: true });

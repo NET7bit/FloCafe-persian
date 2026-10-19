@@ -4,10 +4,10 @@ Operator-facing procedures for a live restaurant installation: daily health, loc
 policy, failure visibility, an incident playbook, the LAN trust boundary, Persian printing
 status, restore rehearsal policy, and the repeatable restaurant-day UAT procedure.
 
-Companion documents: [API.md](API.md) (endpoints, ports, rate limits) ·
+Companion documents: [API.md](reference/api.md) (endpoints, ports, rate limits) ·
 [printers.md](printers.md) (printer setup/troubleshooting) ·
-[printing-nonlatin-capabilities.md](printing-nonlatin-capabilities.md) (non-Latin decision record) ·
-[upgrade-support-matrix.md](upgrade-support-matrix.md) (installed-artifact upgrade evidence).
+[printing.md](architecture/printing.md) (non-Latin decision record) ·
+[maintainers/upgrade-testing.md](maintainers/upgrade-testing.md) (installed-artifact upgrade evidence).
 
 ---
 
@@ -86,7 +86,7 @@ as "due", so a damaged setting can never silently disable backups.
   left to reconciliation), `[Printing]`/`print.` failure codes (a print refusal reports
   `failure_class`, `code`, `stage`, and a `correlation_id`).
 - Collector: support tickets may attach a bounded `log_tail` (see
-  [floadmin-support-ticket-log-handoff.md](floadmin-support-ticket-log-handoff.md)).
+  [cloud-integrations.md](architecture/cloud-integrations.md)).
 
 ---
 
@@ -121,7 +121,7 @@ Operator policy:
 4. **Strong credentials.** Owner account uses a long password and a non-trivial PIN; PINs are what
    authorize refunds and destructive flows.
 5. **Client isolation** between guest networks and the POS LAN (separate SSID/VLAN).
-6. Per-IP rate limits already protect the API surface (see [API.md](API.md)); they are not a
+6. Per-IP rate limits already protect the API surface (see [API.md](reference/api.md)); they are not a
    substitute for the boundary above.
 
 If your environment requires encrypted transport between terminals and the host, that is an
@@ -145,7 +145,7 @@ Status to carry into a go-live decision:
   live, print a Persian receipt on the actual model and validate: shaping, right-to-left order,
   digits/currency, wrapping for long item names, alignment of amounts, tear/cut position, and
   legibility on 80 mm (and 58 mm if used). The checklist is in
-  [printing-nonlatin-capabilities.md](printing-nonlatin-capabilities.md) §6.
+  [printing.md](architecture/printing.md) §6.
 - If a receipt is refused with `print.receipt.failed`, that is the safety contract working: a
   financial row would have lost content. Re-check the selected profile and paper width rather than
   reprinting blind.

@@ -27,10 +27,11 @@ import PosTopbar from '@/components/pos/PosTopbar';
 import { ShiftOpenModal } from '@/components/dashboard/ShiftOpenModal';
 import { ShiftCloseModal } from '@/components/dashboard/ShiftCloseModal';
 import { useCashSession } from '@/hooks/useCashSession';
-import { hasRole, ROLE_ACCESS } from '@shared/role-permissions';
+import { tenantCan } from '@/lib/permissions';
 import { CashDrawerMovementModal } from '@/components/dashboard/CashDrawerMovementModal';
 import { useCashDrawerMovements } from '@/hooks/useCashDrawerMovements';
 import { usePrinterStore } from '@/hooks/usePrinter';
+import { printerService } from '@/lib/printer/PrinterService';
 import { showPrintWarningsToast } from '@/lib/printer/warnings-toast';
 import { formatKotErrorToast, formatReceiptErrorToast } from '@/lib/printer/warnings';
 import { AI_HELP_PROVIDERS, copyPrinterDiagnostic } from '@/lib/printer/ai-help';
@@ -110,7 +111,7 @@ export default function POSPage() {
   const shift = useCashSession();
   // Shift actions follow the same owner/manager/cashier group as the
   // backend route gates (backend still enforces; this only hides the entry).
-  const canUseShift = hasRole(currentTenant?.role, ROLE_ACCESS.ownerManagerCashier);
+  const canUseShift = tenantCan(currentTenant, 'cash.shifts.view');
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -127,6 +128,7 @@ export default function POSPage() {
   const [editingCartItem, setEditingCartItem] = useState<CartItem | null>(null);
   const [checkoutTable, setCheckoutTable] = useState<Table | null>(null);
   const [paymentBill, setPaymentBill] = useState<Bill | null>(null);
+  const [checkoutOverridePin, setCheckoutOverridePin] = useState<string | undefined>();
   const [showCustomerPrompt, setShowCustomerPrompt] = useState(false);
   const [showPrepaidCheckout, setShowPrepaidCheckout] = useState(false);
   const [pendingOrder, setPendingOrder] = useState<Order | null>(null);
@@ -440,12 +442,14 @@ export default function POSPage() {
     return data.bill as Bill;
   };
 
-  const printBillForTenant = async (bill: Bill, force = false) => {
-    if (!currentTenant) return;
-    if (!force && !autoPrintBill) return;
+  const printBillForTenant = async (bill: Bill, force = false, reservedWindow?: Window | null) => {
+    if (!currentTenant || (!force && !autoPrintBill)) {
+      if (reservedWindow && !reservedWindow.closed) reservedWindow.close();
+      return;
+    }
 
     try {
-      const printWarnings = await printBill(bill, currentTenant);
+      const printWarnings = await printBill(bill, currentTenant, undefined, reservedWindow);
       showPrintWarningsToast(printWarnings);
     } catch (err) {
       // Non-fatal: print failure should not block the checkout flow.
@@ -656,6 +660,7 @@ export default function POSPage() {
           special_instructions: cart.orderNotes || undefined,
           online_platform: cart.orderType === 'online' ? cart.onlinePlatform || undefined : undefined,
           external_order_id: cart.orderType === 'online' ? cart.externalOrderId || undefined : undefined,
+          delivery_address: cart.orderType === 'delivery' ? cart.deliveryAddress || undefined : undefined,
           items: cart.items.map((item) => ({
             product_id: item.product.id,
             quantity: item.quantity,
@@ -819,6 +824,7 @@ export default function POSPage() {
           special_instructions: cart.orderNotes || undefined,
           online_platform: cart.orderType === 'online' ? cart.onlinePlatform || undefined : undefined,
           external_order_id: cart.orderType === 'online' ? cart.externalOrderId || undefined : undefined,
+          delivery_address: cart.orderType === 'delivery' ? cart.deliveryAddress || undefined : undefined,
           items: orderItems,
         }, { headers: { 'Idempotency-Key': attempt.orderIdempotencyKey } });
         orderData = data;
@@ -1052,6 +1058,7 @@ export default function POSPage() {
   const handlePaymentComplete = async () => {
     const bill = paymentBill; // capture before clearing state
     setPaymentBill(null);
+    setCheckoutOverridePin(undefined);
     setCheckoutTable(null);
     refreshTables();
 
@@ -1266,7 +1273,20 @@ export default function POSPage() {
           cartItemCount={cart.itemCount()}
           onClose={() => setCheckoutTable(null)}
           onAddItems={handleAddItemsToOrder}
-          onPayment={(bill) => { setCheckoutTable(null); setPaymentBill(bill); }}
+          onPrintBill={async (bill, reservedWindow) => {
+            await printBillForTenant(bill, true, reservedWindow);
+          }}
+          reservePrintWindow={() => {
+            const printer = usePrinterStore.getState();
+            const expectedBrowserPrint = printer.printMethod === 'browser'
+              || (printer.printMethod === 'escpos'
+                && !printer.hardwarePrinter
+                && !printerService.isConnected
+                && printer.status !== 'connecting');
+            return expectedBrowserPrint ? printerService.reserveBrowserPrintWindow() : undefined;
+          }}
+          canGenerateBill={tenantCan(currentTenant, 'bills.generate')}
+          onPayment={(bill, overridePin) => { setCheckoutTable(null); setPaymentBill(bill); setCheckoutOverridePin(overridePin); }}
           onAddCartToOrder={handleAddCartToOrder}
         />
       )}
@@ -1275,7 +1295,8 @@ export default function POSPage() {
         <PaymentModal
           bill={paymentBill}
           currency={currency}
-          onClose={() => setPaymentBill(null)}
+          initialOverridePin={checkoutOverridePin}
+          onClose={() => { setPaymentBill(null); setCheckoutOverridePin(undefined); }}
           onPaid={handlePaymentComplete}
           onBillUpdate={(updated) => setPaymentBill(updated)}
         />

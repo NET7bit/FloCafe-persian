@@ -25,6 +25,13 @@
  *
  * Usage:
  *   const { createApp, seed, api, cleanup, assert, assertEqual } = require('./helpers/test-setup');
+ *
+ * ASSERTION CONTRACT: `assert`/`assertEqual`/`assertIncludes`/`assertGreaterThan`
+ * only print and count; a suite that never reads getResults() would exit 0 with
+ * failing assertions. The `*OrThrow` variants report the same line and counters
+ * and then throw, so a suite that uses them cannot pass while red. Prefer them
+ * in new suites; the counting variants stay for the suites that aggregate
+ * failures through getResults().
  */
 
 const express = require('express');
@@ -85,6 +92,26 @@ function assertGreaterThan(actual: number, expected: number, message: string) {
   }
 }
 
+function assertOrThrow(condition: boolean, message: string) {
+  assert(condition, message);
+  if (!condition) throw new Error(message);
+}
+
+function assertEqualOrThrow(actual: any, expected: any, message: string) {
+  assertEqual(actual, expected, message);
+  if (actual !== expected) throw new Error(`${message} - expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+}
+
+function assertIncludesOrThrow(haystack: string, needle: string, message: string) {
+  assertIncludes(haystack, needle, message);
+  if (!haystack || !haystack.includes(needle)) throw new Error(`${message} - "${haystack}" does not contain "${needle}"`);
+}
+
+function assertGreaterThanOrThrow(actual: number, expected: number, message: string) {
+  assertGreaterThan(actual, expected, message);
+  if (!(actual > expected)) throw new Error(`${message} - expected > ${expected}, got ${actual}`);
+}
+
 function getResults() {
   return { passed, failed, total };
 }
@@ -107,7 +134,7 @@ function isNativeAbiMismatch(error: any): boolean {
 // ── Database Init ────────────────────────────────────────────────────────────
 
 // Production installs no longer seed a default country/currency/timezone
-// (docs/business-decisions.md, "Regional settings come from signup, never
+// (docs/reference/product-invariants.md, "Regional settings come from signup, never
 // from a fallback") — the signup wizard is the only source now. Most tests
 // call initTestDb() and seedOwnerUser() directly, bypassing that wizard, and
 // are not testing regional resolution at all; they just need a deterministic,
@@ -440,6 +467,10 @@ module.exports = {
   assertEqual,
   assertIncludes,
   assertGreaterThan,
+  assertOrThrow,
+  assertEqualOrThrow,
+  assertIncludesOrThrow,
+  assertGreaterThanOrThrow,
   getResults,
   resetCounters,
 
