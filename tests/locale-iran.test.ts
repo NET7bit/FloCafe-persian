@@ -9,6 +9,7 @@ import {
   formatDateForTenant,
   getCountryByCode,
   getCurrencyUnitAdapter,
+  resolveStoredCurrencyDisplay,
 } from '../main/countries';
 
 /**
@@ -46,9 +47,17 @@ test('IR profile resolves fa-IR / IRR / Asia/Tehran', () => {
 test('IR profile exposes locale display options (data-driven UI)', () => {
   const ir = getCountryByCode('IR');
   assert.ok(ir?.localeOptions, 'expected IR to declare localeOptions');
-  assert.deepEqual(ir.localeOptions.currencyDisplay, ['rial', 'toman', 'toman_short']);
+  // Order is preference order: Persian retail quotes prices in toman, so toman
+  // is the default and rial stays selectable.
+  assert.deepEqual(ir.localeOptions.currencyDisplay, ['toman', 'rial', 'toman_short']);
   assert.deepEqual(ir.localeOptions.digits, ['locale', 'latin']);
   assert.deepEqual(ir.localeOptions.calendar, ['locale', 'persian', 'gregorian']);
+});
+
+test('IR defaults to toman when no display preference is stored', () => {
+  assert.equal(resolveStoredCurrencyDisplay(undefined, 'IR'), 'toman');
+  // An explicit choice still wins, so a store that wants rial keeps it.
+  assert.equal(resolveStoredCurrencyDisplay('rial', 'IR'), 'rial');
 });
 
 test('non-IR profiles expose no localeOptions (no Settings UI bloat)', () => {

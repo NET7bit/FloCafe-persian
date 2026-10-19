@@ -89,8 +89,9 @@ function itemLines(lines: readonly string[]): string[] {
 test('suffix display unit resolves for Iran Toman and never for other currencies', () => {
   assert.equal(resolveStoredCurrencyDisplay('toman', 'IR'), 'toman');
   assert.equal(resolveStoredCurrencyDisplay('toman_short', 'IR'), 'toman_short');
-  assert.equal(resolveStoredCurrencyDisplay('bogus', 'IR'), 'rial');
-  assert.equal(resolveStoredCurrencyDisplay(undefined, 'IR'), 'rial');
+  // Unset or unsupported falls back to the country default, which is toman.
+  assert.equal(resolveStoredCurrencyDisplay('bogus', 'IR'), 'toman');
+  assert.equal(resolveStoredCurrencyDisplay(undefined, 'IR'), 'toman');
 
   assert.equal(resolveCurrencyDisplayUnit('IRR', 'rial'), null);
   assert.deepEqual(resolveCurrencyDisplayUnit('IRR', 'toman'), { label: 'تومان', scale: 0.1 });

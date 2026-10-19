@@ -84,7 +84,9 @@ const SUPPORTED: Record<string, Row> = {
   TR: { locale: 'tr-TR', currency: 'TRY', tz: 'Europe/Istanbul',                 taxIdLabel: 'VKN',   taxName: 'KDV' },
   IR: { locale: 'fa-IR', currency: 'IRR', tz: 'Asia/Tehran',                     taxIdLabel: 'Economic Code', taxName: 'VAT',
     localeOptions: {
-      currencyDisplay: ['rial', 'toman', 'toman_short'],
+      // First entry is the default. Persian retail quotes prices in toman, so
+      // toman is the out-of-the-box display; rial stays selectable.
+      currencyDisplay: ['toman', 'rial', 'toman_short'],
       digits: ['locale', 'latin'],
       calendar: ['locale', 'persian', 'gregorian'],
     } },
@@ -274,6 +276,10 @@ export function isLocalePreferenceSupported(key: LocalePreferenceKey, value: str
 
 export function resolveStoredLocalePreference(key: LocalePreferenceKey, stored: string | undefined, countryCode: string): string {
   if (stored && isLocalePreferenceSupported(key, stored, countryCode)) return stored;
+  // Countries list their options in preference order; the first entry is the
+  // default. Iran therefore defaults to toman rather than the neutral fallback.
+  const options = getCountryByCode(countryCode)?.localeOptions?.[LOCALE_OPTION_FIELDS[key]];
+  if (Array.isArray(options) && options.length > 0) return options[0] as string;
   return NEUTRAL_LOCALE_PREFERENCES[key];
 }
 
