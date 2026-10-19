@@ -2436,7 +2436,8 @@
       "support": "Destek ekibiyle iletişime geçme ve sistem tanılamayı görme",
       "inventoryManage": "Sarf malzemelerini ve tarifleri yönetme",
       "accountingView": "Defter-i kebir ve mali raporları görüntüle",
-      "accountingManage": "Yevmiye kayıtlarını işle ve tersine çevir"
+      "accountingManage": "Yevmiye kayıtlarını işle ve tersine çevir",
+      "accountingEntryManage": "Giderleri, alacakları ve mali dönemleri yönet"
     },
     "editorSubtitle": "Rol varsayılanlarını yapılandırın veya tek bir personel için istisna oluşturun. Değişiklikler bir sonraki işlemlerinde geçerli olur.",
     "roleDefaultsTab": "Rol varsayılanları",

@@ -2436,7 +2436,8 @@
       "support": "Contact support and view diagnostics",
       "inventoryManage": "Manage supplies and recipes",
       "accountingView": "View the ledger and financial reports",
-      "accountingManage": "Post and reverse journal entries"
+      "accountingManage": "Post and reverse journal entries",
+      "accountingEntryManage": "Manage expenses, receivables and fiscal periods"
     },
     "editorSubtitle": "Configure role defaults or make an exception for one staff member. Changes apply to their next action.",
     "roleDefaultsTab": "Role defaults",

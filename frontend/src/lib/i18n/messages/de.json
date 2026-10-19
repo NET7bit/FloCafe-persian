@@ -2436,7 +2436,8 @@
       "support": "Support kontaktieren und Diagnosedaten einsehen",
       "inventoryManage": "Vorräte und Rezepte verwalten",
       "accountingView": "Hauptbuch und Finanzberichte anzeigen",
-      "accountingManage": "Journalbuchungen erfassen und stornieren"
+      "accountingManage": "Journalbuchungen erfassen und stornieren",
+      "accountingEntryManage": "Ausgaben, Forderungen und Geschäftsperioden verwalten"
     },
     "editorSubtitle": "Konfigurieren Sie Rollenvorgaben oder legen Sie eine Ausnahme für ein Teammitglied fest. Änderungen gelten ab der nächsten Aktion.",
     "roleDefaultsTab": "Rollenvorgaben",

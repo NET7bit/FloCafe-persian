@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { resetDatabaseWithBackup, resetDatabaseForCurrencyChange, getCurrencyResetImpact, listBackups, deleteBackup, getCurrentSchemaVersion, getDatabase } from '../db';
-import { clearInMemoryRevokedTokens, clearUserAuthCache, requireRole, authRateLimit } from '../middleware/security';
+import { clearInMemoryRevokedTokens, clearUserAuthCache, authRateLimit } from '../middleware/security';
 import { requirePermission } from '../services/authorization';
 import { requireMasterPin } from '../middleware/master-pin';
 import { asyncHandler } from '../middleware/async-handler';
@@ -11,7 +11,6 @@ import { clearJWTSecretCache } from '../security/jwt-secret';
 import { getHttpRequestSignal } from '../shutdown';
 import { googleDrive } from '../services/google-drive';
 import { isSupportedCurrencyCode } from '../../shared/currencies';
-import { ROLE_ACCESS } from '../../shared/role-permissions';
 
 type AuthenticatedRequest = Request & { user?: { userId?: string; role?: string } };
 
@@ -78,7 +77,7 @@ router.get('/master-pin/status', requirePermission('database.manage'), (_req: Re
 // owner must re-authenticate with the account password. Password recovery
 // stays available through /auth/recover-password (master-PIN gated), so an
 // owner who forgets either factor still has a supported path back.
-router.post('/master-pin/reset', authRateLimit(), requireRole(...ROLE_ACCESS.owner), (req: Request, res: Response) => {
+router.post('/master-pin/reset', authRateLimit(), requirePermission('database.manage'), (req: Request, res: Response) => {
   const { pin, confirm_pin, password } = req.body as { pin?: string; confirm_pin?: string; password?: unknown };
   const cleanPin = String(pin || '').trim();
   if (!/^\d{4}$/.test(cleanPin)) {

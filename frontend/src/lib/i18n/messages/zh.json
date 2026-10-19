@@ -2436,7 +2436,8 @@
       "serverApp": "使用独立服务员应用",
       "support": "联系支持并查看诊断",
       "accountingView": "查看总账和财务报表",
-      "accountingManage": "录入和冲销会计分录"
+      "accountingManage": "录入和冲销会计分录",
+      "accountingEntryManage": "管理支出、应收账款和会计期间"
     },
     "editorSubtitle": "配置角色默认权限，或为某位员工设置例外。更改将在其下次操作时生效。",
     "roleDefaultsTab": "角色默认值",

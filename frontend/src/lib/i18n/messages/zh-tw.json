@@ -2327,7 +2327,8 @@
       "serverApp": "使用獨立服務員應用程式",
       "support": "聯絡支援並檢視診斷",
       "accountingView": "檢視總帳與財務報表",
-      "accountingManage": "登錄與沖銷分錄"
+      "accountingManage": "登錄與沖銷分錄",
+      "accountingEntryManage": "管理支出、應收款項與會計期間"
     },
     "editorSubtitle": "設定角色預設值，或為單一位員工建立例外。變更會從他的下一個操作開始生效。",
     "roleDefaultsTab": "角色預設值",

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import Database from 'better-sqlite3';
 import { captureKitchenStationSecurityState, captureKdsEnabledSetting, captureRestoreProtectedSettings, captureUserSecurityState, captureUserStationSecurityState, clearGoogleDriveRestoreBinding, getDatabase, getDbPath, createBackup, createBackupUnlocked, getCurrentSchemaVersion, getForeignKeyViolationKeys, getInventoryMovementRows, getSchemaVersionFromBackup, isSafeIdentifier, mergeKdsEnabledSetting, mergeRestoreProtectedSettings, mergeUserSecurityState, mergeUserStationSecurityState, now, recoverForeignKeyEnforcement, restoreBackup, throwIfDatabaseMaintenanceAborted, validateInventoryLedgerDatabase, validateInventoryLedgerReplacement, validateInventoryLedgerRows, withTxn, withDatabaseMaintenanceLock } from '../db';
-import { clearInMemoryRevokedTokens, clearUserAuthCache, requireRole } from '../middleware/security';
+import { clearInMemoryRevokedTokens, clearUserAuthCache } from '../middleware/security';
 import { requirePermission } from '../services/authorization';
 import { requireMasterPin } from '../middleware/master-pin';
 import { clearJWTSecretCache } from '../security/jwt-secret';

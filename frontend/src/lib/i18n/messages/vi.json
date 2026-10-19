@@ -2327,7 +2327,8 @@
       "support": "Liên hệ hỗ trợ và xem chẩn đoán",
       "inventoryManage": "Quản lý vật tư và công thức",
       "accountingView": "Xem sổ cái và báo cáo tài chính",
-      "accountingManage": "Ghi và đảo bút toán nhật ký"
+      "accountingManage": "Ghi và đảo bút toán nhật ký",
+      "accountingEntryManage": "Quản lý chi phí, khoản phải thu và kỳ kế toán"
     },
     "editorSubtitle": "Cấu hình mặc định theo vai trò hoặc tạo ngoại lệ cho một nhân viên. Thay đổi sẽ áp dụng từ hành động tiếp theo của họ.",
     "roleDefaultsTab": "Mặc định vai trò",

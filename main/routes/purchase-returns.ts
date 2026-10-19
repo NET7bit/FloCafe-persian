@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getDatabase } from '../db';
-import { requireRole } from '../middleware/security';
-import { ROLE_ACCESS } from '../../shared/role-permissions';
+import { requirePermission } from '../services/authorization';
 import {
   createPurchaseReturn,
   deletePurchaseReturn,
@@ -34,7 +33,7 @@ function actorId(req: Request): string {
   return String((req as Request & { user?: { userId?: string } }).user?.userId || '');
 }
 
-router.get('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const purchaseInvoiceId = queryString(req.query.purchase_invoice_id, 'purchase_invoice_id');
     const supplierId = queryString(req.query.supplier_id, 'supplier_id');
@@ -56,7 +55,7 @@ router.get('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Re
   }
 });
 
-router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.post('/', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
@@ -82,7 +81,7 @@ router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: R
   }
 });
 
-router.get('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/:id', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const record = getPurchaseReturn(getDatabase(), String(req.params.id));
     res.json({ return: record });
@@ -91,7 +90,7 @@ router.get('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res:
   }
 });
 
-router.delete('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.delete('/:id', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });

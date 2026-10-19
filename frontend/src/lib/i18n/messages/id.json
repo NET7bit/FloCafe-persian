@@ -2436,7 +2436,8 @@
       "serverApp": "Menggunakan Aplikasi Server mandiri",
       "support": "Menghubungi dukungan dan melihat diagnostik",
       "accountingView": "Lihat buku besar dan laporan keuangan",
-      "accountingManage": "Posting dan balik entri jurnal"
+      "accountingManage": "Posting dan balik entri jurnal",
+      "accountingEntryManage": "Kelola pengeluaran, piutang, dan periode fiskal"
     },
     "editorSubtitle": "Konfigurasikan default peran atau buat pengecualian untuk satu staf. Perubahan berlaku pada tindakan berikutnya.",
     "roleDefaultsTab": "Default peran",

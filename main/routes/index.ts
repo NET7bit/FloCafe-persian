@@ -1,7 +1,6 @@
 import { Express } from 'express';
 import { authRoutes } from './auth';
 import { requireAnyPermission, requirePermission } from '../services/authorization';
-import { requireRole } from '../middleware/security';
 import { ROLE_ACCESS, hasRole } from '../../shared/role-permissions';
 import { categoryRoutes } from './categories';
 import { productRoutes } from './products';

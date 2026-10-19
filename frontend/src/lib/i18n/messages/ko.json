@@ -2436,7 +2436,8 @@
       "serverApp": "독립형 서버 앱(Server App) 사용",
       "support": "지원팀 문의 및 진단 정보 보기",
       "accountingView": "원장 및 재무 보고서 보기",
-      "accountingManage": "분개 입력 및 취소"
+      "accountingManage": "분개 입력 및 취소",
+      "accountingEntryManage": "비용, 미수금 및 회계 기간 관리"
     },
     "editorSubtitle": "역할 기본값을 구성하거나 특정 직원에 대한 예외를 만드세요. 변경 사항은 다음 작업부터 적용됩니다.",
     "roleDefaultsTab": "역할 기본값",

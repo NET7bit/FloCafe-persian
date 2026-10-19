@@ -2327,7 +2327,8 @@
       "support": "Kontaktoni me mbështetjen dhe shikoni diagnostikimin",
       "inventoryManage": "Menaxhoni furnizimet dhe recetat",
       "accountingView": "Shiko librin kryesor dhe raportet financiare",
-      "accountingManage": "Regjistro dhe kthe regjistrimet e ditarit"
+      "accountingManage": "Regjistro dhe kthe regjistrimet e ditarit",
+      "accountingEntryManage": "Menaxho shpenzimet, të arkëtueshmet dhe periudhat fiskale"
     },
     "editorSubtitle": "Konfiguroni vlerat e parazgjedhura të rolit ose bëni një përjashtim për një staf. Ndryshimet zbatohen në veprimin e tij të ardhshëm.",
     "roleDefaultsTab": "Vlerat e parazgjedhura të rolit",

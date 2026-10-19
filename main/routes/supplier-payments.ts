@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getDatabase } from '../db';
-import { requireRole } from '../middleware/security';
-import { ROLE_ACCESS } from '../../shared/role-permissions';
+import { requirePermission } from '../services/authorization';
 import {
   SupplierPaymentMethod,
   createSupplierPayment,
@@ -38,7 +37,7 @@ function actorId(req: Request): string {
   return String((req as Request & { user?: { userId?: string } }).user?.userId || '');
 }
 
-router.get('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const supplierId = queryString(req.query.supplier_id, 'supplier_id');
     const purchaseInvoiceId = queryString(req.query.purchase_invoice_id, 'purchase_invoice_id');
@@ -64,7 +63,7 @@ router.get('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Re
   }
 });
 
-router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.post('/', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
@@ -86,7 +85,7 @@ router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: R
   }
 });
 
-router.get('/supplier-totals/:supplierId', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/supplier-totals/:supplierId', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const total = getSupplierPaidTotal(getDatabase(), String(req.params.supplierId));
     res.json({ total });
@@ -95,7 +94,7 @@ router.get('/supplier-totals/:supplierId', requireRole(...ROLE_ACCESS.ownerManag
   }
 });
 
-router.get('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/:id', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const payment = getSupplierPayment(getDatabase(), String(req.params.id));
     res.json({ payment });
@@ -104,7 +103,7 @@ router.get('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res:
   }
 });
 
-router.delete('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.delete('/:id', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });

@@ -2436,7 +2436,8 @@
       "support": "Contacter l’assistance et afficher les diagnostics",
       "inventoryManage": "Gérer les approvisionnements et les recettes",
       "accountingView": "Voir le grand livre et les rapports financiers",
-      "accountingManage": "Saisir et contre-passer les écritures"
+      "accountingManage": "Saisir et contre-passer les écritures",
+      "accountingEntryManage": "Gérer les dépenses, les créances et les périodes fiscales"
     },
     "editorSubtitle": "Configurez les permissions par défaut d'un rôle ou créez une exception pour un membre du personnel. Les modifications s'appliquent à sa prochaine action.",
     "roleDefaultsTab": "Permissions du rôle",

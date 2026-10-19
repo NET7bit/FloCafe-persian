@@ -2436,7 +2436,8 @@
       "serverApp": "スタンドアロンのサーバーアプリを使用",
       "support": "サポートに連絡し診断情報を表示",
       "accountingView": "元帳と財務レポートを表示",
-      "accountingManage": "仕訳の計上と取消"
+      "accountingManage": "仕訳の計上と取消",
+      "accountingEntryManage": "経費・売掛金・会計期間を管理"
     },
     "editorSubtitle": "役割の既定値を設定するか、特定のスタッフの例外を作成します。変更は次の操作から適用されます。",
     "roleDefaultsTab": "役割の既定値",

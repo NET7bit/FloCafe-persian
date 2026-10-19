@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getDatabase } from '../db';
-import { requireRole } from '../middleware/security';
-import { ROLE_ACCESS } from '../../shared/role-permissions';
+import { requirePermission } from '../services/authorization';
 import {
   PurchaseInvoiceStatus,
   cancelPurchaseInvoice,
@@ -36,7 +35,7 @@ function actorId(req: Request): string {
   return String((req as Request & { user?: { userId?: string } }).user?.userId || '');
 }
 
-router.get('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const supplierId = queryString(req.query.supplier_id, 'supplier_id');
     const status = queryString(req.query.status, 'status') as PurchaseInvoiceStatus | undefined;
@@ -61,7 +60,7 @@ router.get('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Re
   }
 });
 
-router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.post('/', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
@@ -90,7 +89,7 @@ router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: R
   }
 });
 
-router.get('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/:id', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const invoice = getPurchaseInvoice(getDatabase(), String(req.params.id));
     res.json({ invoice });
@@ -99,7 +98,7 @@ router.get('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res:
   }
 });
 
-router.put('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.put('/:id', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const body = req.body || {};
     const items = Array.isArray(body.items)
@@ -123,7 +122,7 @@ router.put('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res:
   }
 });
 
-router.post('/:id/post', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.post('/:id/post', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
@@ -135,7 +134,7 @@ router.post('/:id/post', requireRole(...ROLE_ACCESS.ownerManager), (req: Request
   }
 });
 
-router.post('/:id/cancel', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.post('/:id/cancel', requirePermission('supplies.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });

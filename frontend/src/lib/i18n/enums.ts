@@ -153,6 +153,7 @@ export const PERMISSION_LABEL_KEYS = {
   'support.use': 'support',
 
   'accounting.view': 'accountingView',
+  'accounting.entry.manage': 'accountingEntryManage',
   'accounting.manage': 'accountingManage',
 } as const satisfies Record<PermissionId, PermissionMatrixCapabilityKey>;
 

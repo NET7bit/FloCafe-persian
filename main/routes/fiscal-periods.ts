@@ -4,8 +4,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { getDatabase, withTxn } from '../db';
-import { requireRole } from '../middleware/security';
-import { ROLE_ACCESS } from '../../shared/role-permissions';
+import { requirePermission } from '../services/authorization';
 import { checkPinRateLimit } from './orders';
 import {
   FiscalPeriodError,
@@ -35,7 +34,7 @@ function actorId(req: Request): string | null {
   return actor === undefined || actor === null ? null : String(actor);
 }
 
-router.get('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/', requirePermission('accounting.view'), (req: Request, res: Response) => {
   try {
     const status = req.query.status === 'open' || req.query.status === 'closed' ? req.query.status : undefined;
     res.json({ periods: listFiscalPeriods(getDatabase(), status) });
@@ -44,7 +43,7 @@ router.get('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Re
   }
 });
 
-router.get('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.get('/:id', requirePermission('accounting.view'), (req: Request, res: Response) => {
   try {
     res.json({ period: requirePeriod(getDatabase(), String(req.params.id)) });
   } catch (error: unknown) {
@@ -52,7 +51,7 @@ router.get('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res:
   }
 });
 
-router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.post('/', requirePermission('accounting.entry.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
@@ -69,7 +68,7 @@ router.post('/', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: R
   }
 });
 
-router.post('/:id/close', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.post('/:id/close', requirePermission('accounting.entry.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
@@ -80,7 +79,7 @@ router.post('/:id/close', requireRole(...ROLE_ACCESS.ownerManager), (req: Reques
   }
 });
 
-router.post('/:id/reopen', requireRole(...ROLE_ACCESS.owner), (req: Request, res: Response) => {
+router.post('/:id/reopen', requirePermission('accounting.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });
@@ -96,7 +95,7 @@ router.post('/:id/reopen', requireRole(...ROLE_ACCESS.owner), (req: Request, res
   }
 });
 
-router.delete('/:id', requireRole(...ROLE_ACCESS.ownerManager), (req: Request, res: Response) => {
+router.delete('/:id', requirePermission('accounting.entry.manage'), (req: Request, res: Response) => {
   try {
     const actor = actorId(req);
     if (!actor) return res.status(403).json({ error: 'Authentication required' });

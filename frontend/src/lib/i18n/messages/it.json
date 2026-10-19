@@ -2436,7 +2436,8 @@
       "serverApp": "Usa l'Server App indipendente",
       "support": "Contatta l'assistenza e visualizza le diagnostiche",
       "accountingView": "Visualizza il libro mastro e i report finanziari",
-      "accountingManage": "Registra e storna le scritture contabili"
+      "accountingManage": "Registra e storna le scritture contabili",
+      "accountingEntryManage": "Gestisci spese, crediti e periodi fiscali"
     },
     "editorSubtitle": "Configura le impostazioni predefinite del ruolo o crea un'eccezione per un membro dello staff. Le modifiche si applicano alla prossima azione.",
     "roleDefaultsTab": "Impostazioni ruolo",

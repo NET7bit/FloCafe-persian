@@ -132,6 +132,7 @@ export const PERMISSION_DEFINITIONS = [
   { id: 'support.use', area: 'support', defaultRoles: ALL_STAFF, configurable: true, risk: 'standard' },
 
   { id: 'accounting.view', area: 'accounting', defaultRoles: OWNER_MANAGER, configurable: true, risk: 'sensitive' },
+  { id: 'accounting.entry.manage', area: 'accounting', defaultRoles: OWNER_MANAGER, configurable: true, risk: 'sensitive' },
   { id: 'accounting.manage', area: 'accounting', defaultRoles: OWNER, configurable: true, risk: 'destructive' },
 ] as const satisfies readonly PermissionDefinitionShape[];
 

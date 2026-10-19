@@ -2436,7 +2436,8 @@
       "support": "Makipag-ugnayan sa suporta at tingnan ang diagnostics",
       "inventoryManage": "Pamahalaan ang mga supply at recipe",
       "accountingView": "Tingnan ang ledger at mga ulat sa pananalapi",
-      "accountingManage": "I-post at i-reverse ang mga journal entry"
+      "accountingManage": "I-post at i-reverse ang mga journal entry",
+      "accountingEntryManage": "Pamahalaan ang mga gastos, natatanggap at panahon ng piskal"
     },
     "editorSubtitle": "I-configure ang mga default ng tungkulin o gumawa ng eksepsiyon para sa isang miyembro ng staff. Magkakabisa ang mga pagbabago sa susunod nilang aksyon.",
     "roleDefaultsTab": "Mga default ng tungkulin",
