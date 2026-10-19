@@ -13,7 +13,7 @@ import { resolveContainedPath } from './lib/path-containment';
 import { serializeMerchantTemplatePayload, validateMerchantTemplateText } from '../shared/print';
 import { ROLE_KEYS } from '../shared/role-permissions';
 import { businessDateForInstant, dayBoundsInTimezone, normalizeBusinessDayStartTime, utcDayBounds } from '../shared/business-date';
-import { getCurrencyFractionDigits, resolveRegionalSnapshot } from './countries';
+import { getCountryByCode, getCurrencyFractionDigits, resolveRegionalSnapshot, resolveStoredLocalePreference } from './countries';
 import { MigrationConvergenceError } from './migration-diagnostics';
 import type { MigrationConvergenceProblem } from './migration-diagnostics';
 
@@ -7843,6 +7843,41 @@ export function dateStampInTimezone(timezone: string): string {
 
 type InvoiceResetPeriod = 'never' | 'daily' | 'monthly' | 'financial_year';
 
+/**
+ * True when the store reads documents in the Persian (Jalali) calendar. The
+ * stored `calendar` setting wins; `locale` follows the country's locale, so an
+ * Iranian store is Jalali unless it explicitly asks for Gregorian.
+ */
+function tenantUsesPersianCalendar(): boolean {
+  const country = getSettingValue('country') || '';
+  const resolved = resolveStoredLocalePreference('calendar', getSettingValue('calendar') ?? undefined, country);
+  if (resolved === 'persian') return true;
+  if (resolved === 'gregorian') return false;
+  return (getCountryByCode(country)?.locale ?? '').startsWith('fa');
+}
+
+/**
+ * Date segment for order/bill numbers, in the calendar the store reads them in
+ * (`YYYYMMDD`). Persian stores get e.g. `14050727` instead of `20261019`, and the
+ * same stamp is used as the numbering bucket so sequences stay aligned with the
+ * visible date.
+ */
+export function documentDateStamp(timezone: string): string {
+  if (!tenantUsesPersianCalendar()) return dateStampInTimezone(timezone);
+  try {
+    const parts = new Intl.DateTimeFormat('en-u-ca-persian-nu-latn', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+    return `${get('year')}${get('month')}${get('day')}`;
+  } catch {
+    return dateStampInTimezone(timezone);
+  }
+}
+
 function datePartsInTimezone(timezone: string): { year: number; month: number; day: number } {
   try {
     const parts = new Intl.DateTimeFormat('en-CA', {
@@ -7881,7 +7916,7 @@ function financialYearSegment(timezone: string, startMonth: number, startDay: nu
 }
 
 function invoicePeriodSegment(period: InvoiceResetPeriod, timezone: string, startMonth: number, startDay: number): string {
-  const date = dateStampInTimezone(timezone);
+  const date = documentDateStamp(timezone);
   if (period === 'monthly') return date.slice(0, 6);
   if (period === 'financial_year') return financialYearSegment(timezone, startMonth, startDay);
   return date;
@@ -7914,10 +7949,10 @@ export function generateOrderNumber(): string {
   const timezone = requireTenantTimezone();
 
   // Per-day bucket when reset daily, otherwise a single bucket.
-  const bucket = resetDaily ? dateStampInTimezone(timezone) : 'ALL';
+  const bucket = resetDaily ? documentDateStamp(timezone) : 'ALL';
   const next = getNextSequence('orders', bucket);
 
-  const dateSegment = includeDate ? dateStampInTimezone(timezone) : '';
+  const dateSegment = includeDate ? documentDateStamp(timezone) : '';
   return [prefix, dateSegment, String(next).padStart(4, '0')].filter(Boolean).join('-');
 }
 
