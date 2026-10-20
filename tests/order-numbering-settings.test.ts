@@ -91,6 +91,35 @@ async function main() {
     const badDay = await request(app).put('/api/settings/order-numbering').send({ invoice_financial_year_start_day: 0 });
     assertEqual(badDay.status, 400, 'rejects invalid FY day');
 
+    // A number with no date in it cannot restart daily: the second day would
+    // re-issue yesterday's identifier and fail the unique index.
+    console.log('\n8. Undated numbering never re-issues an existing identifier');
+    const { generateOrderNumber, generateBillNumber } = require('../main/db');
+    const setSetting = (key: string, value: string) => {
+      db.prepare(`
+        INSERT INTO settings (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(key, value);
+    };
+    setSetting('order_number_prefix', 'F');
+    setSetting('order_number_include_date', 'false');
+    setSetting('order_number_reset_daily', 'true');
+    setSetting('invoice_number_prefix', 'INV');
+    setSetting('invoice_number_include_period', 'false');
+    setSetting('invoice_number_reset_period', 'daily');
+
+    const seededOrder = db.prepare(`
+      INSERT INTO orders (order_number, type, status, subtotal, total)
+      VALUES ('F-0001', 'takeaway', 'completed', 0, 0)
+    `).run();
+    db.prepare(`
+      INSERT INTO bills (bill_number, order_id, subtotal, total)
+      VALUES ('INV-0001', ?, 0, 0)
+    `).run(Number(seededOrder.lastInsertRowid));
+
+    assertEqual(generateOrderNumber(), 'F-0002', 'undated order number continues past the issued suffix');
+    assertEqual(generateBillNumber(), 'INV-0002', 'undated bill number continues past the issued suffix');
+
     console.log('\n' + '='.repeat(50));
     const results = getResults();
     console.log(`Results: ${results.passed}/${results.total} passed, ${results.failed} failed`);

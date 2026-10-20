@@ -7927,6 +7927,23 @@ function sanitizedNumberPrefix(value: string | null | undefined, fallback: strin
   return (value ?? fallback).replace(/[^A-Za-z0-9]/g, '');
 }
 
+/**
+ * Next number for documents whose printed identifier carries no date.
+ *
+ * A daily-reset sequence would restart at 1 every day and re-emit the same
+ * identifier, so uniqueness comes from the highest suffix already issued for
+ * this prefix instead of a period bucket.
+ */
+function nextUndatedNumber(table: 'orders' | 'bills', column: 'order_number' | 'bill_number', prefix: string): number {
+  const rows = db.prepare(`SELECT ${column} AS value FROM ${table} WHERE ${column} LIKE ?`).all(`${prefix}-%`) as { value: string }[];
+  let highest = 0;
+  for (const row of rows) {
+    const suffix = /-(\d+)$/.exec(row.value);
+    if (suffix) highest = Math.max(highest, Number(suffix[1]));
+  }
+  return highest + 1;
+}
+
 // Order/bill numbering buckets and displayed date/period segments on a
 // tenant-local day. A missing timezone must not silently fall through to the
 // date helpers' own UTC fallback — at a local day/month/year boundary that
@@ -7948,11 +7965,17 @@ export function generateOrderNumber(): string {
   const resetDaily = getSettingValue('order_number_reset_daily') !== 'false';
   const timezone = requireTenantTimezone();
 
+  // Without a date in the identifier a period bucket would repeat yesterday's
+  // number and collide, so uniqueness comes from the issued suffixes instead.
+  if (!includeDate) {
+    return `${prefix}-${String(nextUndatedNumber('orders', 'order_number', prefix)).padStart(4, '0')}`;
+  }
+
   // Per-day bucket when reset daily, otherwise a single bucket.
   const bucket = resetDaily ? documentDateStamp(timezone) : 'ALL';
   const next = getNextSequence('orders', bucket);
 
-  const dateSegment = includeDate ? documentDateStamp(timezone) : '';
+  const dateSegment = documentDateStamp(timezone);
   return [prefix, dateSegment, String(next).padStart(4, '0')].filter(Boolean).join('-');
 }
 
@@ -7964,6 +7987,12 @@ export function generateBillNumber(): string {
     ? configuredPeriod as InvoiceResetPeriod
     : 'daily';
   const timezone = requireTenantTimezone();
+
+  // Same rule as orders: no period in the identifier means no period bucket.
+  if (!includePeriod) {
+    return `${prefix}-${String(nextUndatedNumber('bills', 'bill_number', prefix)).padStart(4, '0')}`;
+  }
+
   const fyStart = clampFinancialYearStart(
     getSettingValue('invoice_financial_year_start_month'),
     getSettingValue('invoice_financial_year_start_day'),
@@ -7971,7 +8000,7 @@ export function generateBillNumber(): string {
   const periodSegment = invoicePeriodSegment(resetPeriod === 'never' ? 'daily' : resetPeriod, timezone, fyStart.month, fyStart.day);
   const bucket = resetPeriod === 'never' ? 'ALL' : periodSegment;
   const next = getNextSequence('bills', bucket);
-  return [prefix, includePeriod ? periodSegment : '', String(next).padStart(4, '0')].filter(Boolean).join('-');
+  return [prefix, periodSegment, String(next).padStart(4, '0')].filter(Boolean).join('-');
 }
 
 export function now(): string {
