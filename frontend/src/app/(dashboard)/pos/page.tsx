@@ -90,6 +90,11 @@ interface PrepaidAttempt {
 const isUsablePostpaidAttempt = (attempt: PostpaidAttempt): boolean =>
   typeof attempt.fingerprint === 'string' && !!attempt.idempotencyKey;
 
+/** The server accepts 1..99 only; a restored or held cart can carry a stale
+ * count, and the sale would then fail for a reason unrelated to the order. */
+const payloadGuestCount = (count: number): number | undefined =>
+  Number.isInteger(count) && count >= 1 && count <= 99 ? count : undefined;
+
 const isUsablePrepaidAttempt = (attempt: PrepaidAttempt): boolean =>
   typeof attempt.cartFingerprint === 'string'
   && typeof attempt.paymentFingerprint === 'string'
@@ -656,7 +661,7 @@ export default function POSPage() {
           table_id: cart.tableId,
           customer_id: cart.customerId,
           type: cart.orderType,
-          guest_count: cart.guestCount,
+          guest_count: payloadGuestCount(cart.guestCount),
           special_instructions: cart.orderNotes || undefined,
           online_platform: cart.orderType === 'online' ? cart.onlinePlatform || undefined : undefined,
           external_order_id: cart.orderType === 'online' ? cart.externalOrderId || undefined : undefined,
@@ -820,7 +825,7 @@ export default function POSPage() {
           table_id: cart.tableId,
           customer_id: cart.customerId,
           type: cart.orderType,
-          guest_count: cart.guestCount,
+          guest_count: payloadGuestCount(cart.guestCount),
           special_instructions: cart.orderNotes || undefined,
           online_platform: cart.orderType === 'online' ? cart.onlinePlatform || undefined : undefined,
           external_order_id: cart.orderType === 'online' ? cart.externalOrderId || undefined : undefined,
