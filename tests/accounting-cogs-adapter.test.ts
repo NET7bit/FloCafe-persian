@@ -320,6 +320,58 @@ async function main() {
   assertEqual(reprocessCogsAccounting(String(itemMissingRev), owner.userId).status, 'reversal_created', 'reprocess creates the missing reversal');
   assertEqual(reprocessCogsAccounting(String(itemMissingRev), owner.userId).status, 'already_reversed', 'a refunded, already-reversed item is never re-recognized');
 
+  // ── P1/P2: NULL frozen cost is never zero; only depletion/restore count ──
+  function cogsDebitTotal(journalId: string | number): number {
+    return Number((db.prepare(
+      "SELECT COALESCE(SUM(CASE WHEN direction = 'debit' THEN amount END), 0) AS a FROM journal_entry_lines WHERE journal_id = ?",
+    ).get(journalId) as any).a);
+  }
+
+  // (a) numeric baseline — a fully priced consumption still posts COGS
+  const orderNum = await createOrder([{ product_id: 'prod-latte', quantity: 1 }]);
+  const itemNum = orderItemId(orderNum, 'prod-latte');
+  const billNum = insertBill(orderNum, 250);
+  recognizeSale(billNum, 250);
+  const journalNum = createItemCogsJournal(itemNum, owner.userId);
+  assert(!!journalNum, 'P1: a fully numeric consumption still posts a COGS journal');
+  assertEqual(cogsDebitTotal(journalNum!.id), 36, 'P1: frozen amount is 1 × 18 × 2 = 36');
+
+  // (b) P2 — a non-consumption movement referencing the same order item is excluded
+  const orderP2 = await createOrder([{ product_id: 'prod-latte', quantity: 1 }]);
+  const itemP2 = orderItemId(orderP2, 'prod-latte');
+  const depletionP2 = db.prepare(
+    "SELECT supply_id, unit FROM supply_movements WHERE reference_type = 'order_item' AND reference_id = ? AND movement_type = 'recipe_depletion'",
+  ).get(String(itemP2)) as any;
+  db.prepare(`
+    INSERT INTO supply_movements (supply_id, quantity_delta, movement_type, unit, stock_after, reason,
+      actor_user_id, reference_type, reference_id, created_at, unit_cost, total_cost)
+    VALUES (?, -1, 'waste', ?, 0, 'P2 probe', ?, 'order_item', ?, ?, 5, -5)
+  `).run(depletionP2.supply_id, depletionP2.unit, owner.userId, String(itemP2), now());
+  const billP2 = insertBill(orderP2, 250);
+  recognizeSale(billP2, 250);
+  const journalP2 = createItemCogsJournal(itemP2, owner.userId);
+  assert(!!journalP2, 'P2: the item still posts COGS alongside an unrelated movement');
+  assertEqual(cogsDebitTotal(journalP2!.id), 36, 'P2: a waste movement on the order item never enters sale COGS');
+
+  // (c) P1 — an unknown frozen cost yields no journal, never a zero one
+  const orderNull = await createOrder([{ product_id: 'prod-latte', quantity: 1 }]);
+  const itemNull = orderItemId(orderNull, 'prod-latte');
+  db.prepare(
+    "UPDATE supply_movements SET total_cost = NULL WHERE reference_type = 'order_item' AND reference_id = ? AND movement_type = 'recipe_depletion'",
+  ).run(String(itemNull));
+  const billNull = insertBill(orderNull, 250);
+  recognizeSale(billNull, 250);
+  assertEqual(createItemCogsJournal(itemNull, owner.userId), null, 'P1: an unknown frozen cost posts no COGS instead of zero');
+  assertEqual(cogsJournals(db, itemNull).length, 0, 'P1: no journal row is written for an unknown cost');
+
+  // (d) no movements at all — nothing consumed, nothing to post
+  const orderNone = await createOrder([{ product_id: 'prod-latte', quantity: 1 }]);
+  const itemNone = orderItemId(orderNone, 'prod-latte');
+  db.prepare("DELETE FROM supply_movements WHERE reference_type = 'order_item' AND reference_id = ?").run(String(itemNone));
+  const billNone = insertBill(orderNone, 250);
+  recognizeSale(billNone, 250);
+  assertEqual(createItemCogsJournal(itemNone, owner.userId), null, 'P1: an empty movement set posts nothing');
+
   // ── Ledger invariants ──
   const unbalanced = db.prepare(`
     SELECT j.id, COALESCE(SUM(CASE WHEN l.direction = 'debit' THEN l.amount END), 0) AS d,

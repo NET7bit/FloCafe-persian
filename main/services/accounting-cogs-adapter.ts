@@ -49,17 +49,36 @@ function fail(scope: string, error: unknown): null {
 /**
  * Net frozen consumption value for one order item: depletions are negative
  * `total_cost`, restores positive, so negating the sum yields the cost of the
- * supplies currently consumed. Pre-migration movements are NULL and ignored.
+ * supplies currently consumed.
+ *
+ * Only `recipe_depletion` / `recipe_restore` participate: they are the only
+ * movement types written against an `order_item` reference. Every other type
+ * (receive, waste, adjustment, count, purchase_return) belongs to a different
+ * ledger concern and must never leak into sale COGS.
+ *
+ * Returns `null` when any participating movement carries a NULL `total_cost`:
+ * an unknown cost is not zero, and summing around it would silently understate
+ * COGS. An empty set still returns 0 (nothing consumed, nothing to post).
  */
-function itemConsumptionCost(db: Database, orderItemId: string | number): number {
+function itemConsumptionCost(db: Database, orderItemId: string | number): number | null {
   const idText = String(orderItemId);
   const row = db.prepare(`
-    SELECT COALESCE(SUM(total_cost), 0) AS net_cost
+    SELECT
+      COALESCE(SUM(total_cost), 0) AS net_cost,
+      COUNT(*) AS movement_count,
+      SUM(CASE WHEN total_cost IS NULL THEN 1 ELSE 0 END) AS unknown_count
     FROM supply_movements
     WHERE reference_type = 'order_item'
+      AND movement_type IN ('recipe_depletion', 'recipe_restore')
       AND (reference_id = ? OR reference_id GLOB ?)
-  `).get(idText, `${idText}:*`) as { net_cost: number | null } | undefined;
-  const net = Number(row?.net_cost ?? 0);
+  `).get(idText, `${idText}:*`) as
+    | { net_cost: number | null; movement_count: number; unknown_count: number | null }
+    | undefined;
+
+  if (!row || Number(row.movement_count) === 0) return 0;
+  if (Number(row.unknown_count ?? 0) > 0) return null;
+
+  const net = Number(row.net_cost ?? 0);
   if (!Number.isFinite(net)) return 0;
   const consumed = Number((-net).toFixed(8));
   return Math.abs(consumed) < 1e-9 ? 0 : consumed;
@@ -138,7 +157,9 @@ export function createItemCogsJournal(
     const bill = coveringBill(db, item.order_id, item.id);
     if (!bill) return null;
     const amount = itemConsumptionCost(db, item.id);
-    if (amount <= 0) return null;
+    // Unknown frozen cost (NULL total_cost): never post a COGS journal from an
+    // incomplete sum. Recognition stays pending for reconciliation.
+    if (amount === null || amount <= 0) return null;
     const entryDate = entryDateOverride || fiscalDateForInstant(bill.created_at);
     const seq = nextCogsSeq(db, item.id);
     return withTxn(() => createJournal({
@@ -286,6 +307,7 @@ export function listUnresolvedCogsEvents(): UnresolvedCogsEvent[] {
     AND COALESCE((
       SELECT -SUM(m.total_cost) FROM supply_movements m
       WHERE m.reference_type = 'order_item'
+        AND m.movement_type IN ('recipe_depletion', 'recipe_restore')
         AND (m.reference_id = CAST(oi.id AS TEXT) OR m.reference_id GLOB CAST(oi.id AS TEXT) || ':*')
     ), 0) > 0.000000001
     ORDER BY oi.id
