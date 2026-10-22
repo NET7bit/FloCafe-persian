@@ -21,7 +21,7 @@ git branch backup/main-pre-merge-$(date +%Y%m%d-%H%M%S)
 
 ## 2. Understand the commit topology in C1-isolated
 
-```
+```text
 3e3d3ac6  (fork HEAD before merge, 48 files changed, flo.db 2026-10-06)
 3adca85a  chore(c2): materialize verified working-tree snapshot on 3e3d3ac6
 580e8427  merge: integrate origin/main into the fork snapshot (C2.2 resolution)
@@ -40,6 +40,7 @@ Instead, replay the **policy** below on a fresh merge in the real repo.
 ## 3. Merge strategy (recommended: rebase-then-merge or direct merge)
 
 ### Option A — Merge commit (safest, preserves history)
+
 ```bash
 git fetch origin
 git merge origin/main
@@ -48,6 +49,7 @@ git merge --continue
 ```
 
 ### Option B — Rebase onto upstream (cleaner history, harder)
+
 ```bash
 git fetch origin
 git rebase origin/main
@@ -89,23 +91,28 @@ These are **not** conflicts; they are tree-wide adjustments that must be done
 after the merge resolves cleanly.
 
 ### 6.1 Print renderers — add the customer-details block
+
 Upstream `PrintDocument` now carries a `customer` block with `heading`,
 `address`, and `addressLabel`.  The fork's backend renderers predate this block.
 
 **Files to edit**:
+
 - `main/printers/document-classic.ts`
 - `main/printers/document-compact.ts`
 
 **Changes** (see commit `0668314a` in C1-isolated for exact diffs):
+
 1. Re-import `pushWrapped` from `shared/print/formatting-helpers` if not present.
 2. In the `'customer'` case block, render `block.heading` as a centered bold line.
 3. After the phone line, render `block.address` with label prefix and wrapping.
 
 ### 6.2 i18n — complete missing fork keys for every locale
+
 Upstream added 9 new locales. Each ships with only upstream's key set.
 The fork adds ~130 accounting/customer-account keys that must be present.
 
 **Fastest path**: copy the prepared translations from C1-isolated:
+
 ```bash
 # In C1-isolated:
 cp c2-tmp/i18n/*.json /tmp/fork-i18n/
@@ -114,12 +121,15 @@ node scripts/apply-fork-i18n.cjs   # or manually merge the 130 keys per locale
 ```
 
 **Verification**:
+
 ```bash
 node -e "const d=require('./frontend/src/lib/i18n/messages'); /* parity check */"
 ```
+
 All 11 locales must show **2893 keys** parity with `en.json`.
 
 ### 6.3 Test assertion updates
+
 - `tests/accounting-ui.test.ts`: the sidebar moved from role-list strings to
   permission-id checks. Assert the mandate through the permission registry
   (entry's permission must be permitted for exactly `owner` and `manager`).
@@ -152,6 +162,7 @@ if needed.
 ## 8. Divergence decision (owner must choose)
 
 The real repo is currently **+31 / -90** vs `origin/main`.  After this merge:
+
 - Accept upstream deletions → divergence shrinks.
 - Keep fork-only files (accounting, customer-account, Persian print patches) →
   divergence never reaches zero.
@@ -164,6 +175,7 @@ module or maintain it as a permanent fork.
 ## 9. Emergency rollback
 
 If the merge breaks the real repo:
+
 ```bash
 cd C:/Users/CofeRoyal/FloCafe-persian
 git reset --hard backup/main-pre-merge-<timestamp>

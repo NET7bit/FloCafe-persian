@@ -49,7 +49,7 @@ creation stamp and a random suffix; pre-migration snapshots add `-pre-v<schema>`
 
 ### Daily local backup (opt in)
 
-```
+```text
 auto_backup_enabled = true     # setting; absent/false leaves the schedule off
 auto_backup_last_at            # written by the app after a successful automatic backup
 ```

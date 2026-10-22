@@ -98,7 +98,8 @@ balanced, fiscal-gated). Nothing existing is rewritten; reports reconcile, they 
 ## 6. Journal Model (منطقی — بدون اجرا)
 
 **`accounting_accounts`** (پیشنهاد schema)
-```
+
+```text
 id TEXT PK (acct_…), code TEXT UNIQUE, name TEXT NOT NULL,
 type TEXT CHECK IN ('asset','liability','equity','revenue','expense'),
 normal_side TEXT CHECK IN ('debit','credit'),
@@ -107,7 +108,8 @@ created_at, updated_at
 ```
 
 **`journal_entries`** (پیشنهاد schema — append-only)
-```
+
+```text
 id TEXT PK (je_…),
 entry_date TEXT NOT NULL (YYYY-MM-DD، تاریخ مالی مستند؛ ایندکس شود),
 description TEXT,
@@ -126,6 +128,7 @@ lines: journal_entry_lines (
   amount REAL CHECK (amount > 0), line_description TEXT
 ) + table-level trigger/tx check: SUM(debit)=SUM(credit) per journal
 ```
+
 > **Period از `entry_date` مشتق می‌شود و به‌صورت state مستقل ذخیره نمی‌شود؛ بنابراین period
 > information به‌صورت duplicated state نگهداری نمی‌شود** (بازنگری Stage-3.4؛ اصل ۲). فیلترینگ
 > دوره‌ای مستقیماً روی `entry_date` (ایندکس‌شده) انجام می‌شود.
