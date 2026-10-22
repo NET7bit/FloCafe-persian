@@ -80,7 +80,7 @@ async function main() {
 
   // ── Seeded account chart (v102 seeds 12; later milestones add accounts) ──
   const accounts = db.prepare('SELECT code, name, type, normal_side, is_system, is_active FROM accounting_accounts ORDER BY code').all() as any[];
-  assertEqual(accounts.length, 13, 'exactly 13 accounts seeded');
+  assertEqual(accounts.length, 16, 'exactly 16 accounts seeded');
   const byCode = new Map(accounts.map((a: any) => [a.code, a]));
   const expected: Array<[string, string, string, string]> = [
     ['1000', 'Cash', 'asset', 'debit'],
@@ -88,12 +88,15 @@ async function main() {
     ['1100', 'Accounts Receivable', 'asset', 'debit'],
     ['1200', 'Inventory — Purchases Holding', 'asset', 'debit'],
     ['2000', 'Accounts Payable', 'liability', 'credit'],
+    ['2010', 'Payroll Payable', 'liability', 'credit'],
+    ['2020', 'Payroll Withholdings Payable', 'liability', 'credit'],
     ['2100', 'Sales Tax Payable', 'liability', 'credit'],
     ['3000', 'Opening Equity', 'equity', 'credit'],
     ['4000', 'Sales Revenue', 'revenue', 'credit'],
     ['4010', 'Sales Returns', 'revenue', 'debit'],
     ['4020', 'Sales Discounts', 'revenue', 'debit'],
     ['5000', 'Operating Expenses', 'expense', 'debit'],
+    ['5010', 'Salaries and Wages', 'expense', 'debit'],
     ['5100', 'Cost of Goods Sold', 'expense', 'debit'],
     ['5900', 'Cash Over/Short', 'expense', 'debit'],
   ];
@@ -155,7 +158,17 @@ async function main() {
   let rerunFailed = false;
   try { v102.up(); v102.up(); } catch { rerunFailed = true; }
   assert(!rerunFailed, 're-running the migration is idempotent');
-  assertEqual((db.prepare('SELECT COUNT(*) AS n FROM accounting_accounts').get() as any).n, 13, 're-run preserves existing rows');
+  assertEqual((db.prepare('SELECT COUNT(*) AS n FROM accounting_accounts').get() as any).n, 16, 're-run preserves existing rows');
+
+  // ── The payroll chart seed is idempotent too (owner decision, Gate D3.22) ──
+  const payrollMigration = MIGRATIONS.find((m: any) => m.name === 'add_payroll_accounting');
+  assert(!!payrollMigration, 'the payroll chart migration is registered');
+  let payrollRerunFailed = false;
+  try { payrollMigration.up(); payrollMigration.up(); } catch { payrollRerunFailed = true; }
+  assert(!payrollRerunFailed, 're-running the payroll chart migration is idempotent');
+  assertEqual((db.prepare('SELECT COUNT(*) AS n FROM accounting_accounts').get() as any).n, 16, 'payroll re-run keeps the chart at 16 accounts');
+  const duplicateCodes = db.prepare('SELECT code FROM accounting_accounts GROUP BY code HAVING COUNT(*) > 1').all() as any[];
+  assertEqual(duplicateCodes.length, 0, 'payroll re-run creates no duplicate account code');
 
   // ── Prior v93–v101 tables survive ──
   const allTables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r: any) => r.name);

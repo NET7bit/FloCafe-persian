@@ -128,8 +128,21 @@ async function main() {
     db.prepare('DELETE FROM sequences WHERE name = ?').run('bills');
     const noReset = generateBillNumber();
     assertEqual(noReset, 'INV-0001', 'No-reset bill number omits period text when configured');
+    // Without a period in the identifier there is no bucket to advance: a bucket
+    // would repeat yesterday's number and collide, so uniqueness comes from the
+    // issued suffixes instead (the same rule generateOrderNumber documents at
+    // main/db.ts:8135-8139). The undated path must therefore write no sequence row.
     const noResetRow = db.prepare("SELECT date FROM sequences WHERE name = 'bills'").get() as any;
-    assertEqual(noResetRow?.date, 'ALL', 'No-reset sequence bucket is ALL');
+    assertEqual(noResetRow, undefined, 'Undated bill numbering writes no sequence bucket');
+
+    // ── Test 12b: Invoice numbers can run without resets but keep period text ─
+    console.log('\n12b. Bill numbers keep a single ALL bucket when period text stays and resets are off');
+    db.prepare("UPDATE settings SET value = 'true' WHERE key = 'invoice_number_include_period'").run();
+    db.prepare('DELETE FROM sequences WHERE name = ?').run('bills');
+    const noResetDated = generateBillNumber();
+    assertEqual(noResetDated, `INV-${orderToday}-0001`, 'No-reset bill number keeps the daily segment');
+    const noResetDatedRow = db.prepare("SELECT date FROM sequences WHERE name = 'bills'").get() as any;
+    assertEqual(noResetDatedRow?.date, 'ALL', 'No-reset sequence bucket is ALL');
 
     // ── Test 13: A pre-existing prefix saved with a trailing dash is ──
     // ── sanitized so it doesn't double up with the auto separator ─────

@@ -63,8 +63,22 @@ async function main() {
   const revenue = getAccountByCode('4000');
   const returns = getAccountByCode('4010');
 
-  assertEqual(listAccounts().length, 13, '13 seeded accounts are listed');
+  assertEqual(listAccounts().length, 16, '16 seeded accounts are listed');
   assert(listAccounts({ activeOnly: true }).every((a: any) => a.is_active === 1), 'activeOnly filters inactive accounts');
+
+  // Owner decision (Gate D3.22): the payroll accounts are part of the default
+  // chart of accounts, so their identity, type and normal side are contractual.
+  const payrollAccounts: Array<[string, string, string, string]> = [
+    ['5010', 'Salaries and Wages', 'expense', 'debit'],
+    ['2010', 'Payroll Payable', 'liability', 'credit'],
+    ['2020', 'Payroll Withholdings Payable', 'liability', 'credit'],
+  ];
+  for (const [code, name, type, side] of payrollAccounts) {
+    const account = getAccountByCode(code);
+    assertEqual(account?.name, name, `payroll account ${code} carries its seeded name`);
+    assertEqual(account?.type, type, `payroll account ${code} keeps its type`);
+    assertEqual(account?.normal_side, side, `payroll account ${code} keeps its normal side`);
+  }
 
   // ── Balanced journal succeeds ──
   const sale = createJournal({

@@ -1942,29 +1942,87 @@ export function getBackupMetadata(backupPath: string): BackupMetadata {
 }
 
 /** Lists auto and manual backups located in the managed backups directory, newest first. */
-export function listBackups(): { fileName: string; path: string; sizeBytes: number; createdAt: string; kind: 'manual' | 'auto'; schemaVersion: number | null }[] {
-  const backupDir = getBackupDir();
-  if (!fs.existsSync(backupDir)) return [];
+export type StartupRestoreDiscoveryDiagnostics = {
+  /** Backup-named entries readdir returned; null when listing itself failed. */
+  entriesObserved: number | null;
+  /** Entries dropped because a path or stat call threw (an operational failure, not a bad backup). */
+  entriesSkippedWithError: number;
+  /** Every dropped entry, in observation order, with the reason it never reached validation. */
+  skipped: Array<{ ordinal: number; code: StartupRestoreRejectionCode }>;
+  discoveryError: 'BACKUP_DIRECTORY_UNAVAILABLE' | null;
+};
 
-  return fs.readdirSync(backupDir)
-    .filter((fileName) => fileName.startsWith('flo-backup-') && fileName.endsWith('.db'))
-    .map((fileName) => ({ fileName, fullPath: resolveContainedPath(backupDir, fileName) }))
-    .filter((entry): entry is { fileName: string; fullPath: string } => {
-      if (!entry.fullPath) return false;
-      try { return fs.lstatSync(entry.fullPath).isFile(); } catch { return false; }
-    })
-    .map(({ fileName, fullPath }) => {
-      const stat = fs.statSync(fullPath);
-      return {
-        fileName,
-        path: fullPath,
-        sizeBytes: stat.size,
-        createdAt: stat.mtime.toISOString(),
-        kind: (fileName.includes('-pre-v') || isRestoreSafetyCopyName(fileName) ? 'auto' : 'manual') as 'manual' | 'auto',
-        schemaVersion: readBackupSchemaVersion(fullPath),
-      };
-    })
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+function listBackupsDetailed(): {
+  entries: { fileName: string; path: string; sizeBytes: number; createdAt: string; kind: 'manual' | 'auto'; schemaVersion: number | null }[];
+  diagnostics: StartupRestoreDiscoveryDiagnostics;
+} {
+  const diagnostics: StartupRestoreDiscoveryDiagnostics = {
+    entriesObserved: null,
+    entriesSkippedWithError: 0,
+    skipped: [],
+    discoveryError: null,
+  };
+
+  let backupDir: string;
+  let names: string[];
+  try {
+    backupDir = getBackupDir();
+    if (!fs.existsSync(backupDir)) {
+      diagnostics.entriesObserved = 0;
+      return { entries: [], diagnostics };
+    }
+    names = fs.readdirSync(backupDir);
+  } catch {
+    // The folder could not even be read: this is not "no backups", and the
+    // event must be able to say so.
+    diagnostics.discoveryError = 'BACKUP_DIRECTORY_UNAVAILABLE';
+    return { entries: [], diagnostics };
+  }
+
+  const candidates = names.filter((fileName) => fileName.startsWith('flo-backup-') && fileName.endsWith('.db'));
+  diagnostics.entriesObserved = candidates.length;
+
+  const entries: { fileName: string; path: string; sizeBytes: number; createdAt: string; kind: 'manual' | 'auto'; schemaVersion: number | null }[] = [];
+  let ordinal = 0;
+  for (const fileName of candidates) {
+    ordinal += 1;
+    const fullPath = resolveContainedPath(backupDir, fileName);
+    if (!fullPath) {
+      diagnostics.entriesSkippedWithError += 1;
+      diagnostics.skipped.push({ ordinal, code: 'LIST_PATH_REJECTED' });
+      continue;
+    }
+    let isFile: boolean;
+    try {
+      isFile = fs.lstatSync(fullPath).isFile();
+    } catch {
+      // Previously silent: a transient lstat failure made the file vanish and
+      // the folder look empty.
+      diagnostics.entriesSkippedWithError += 1;
+      diagnostics.skipped.push({ ordinal, code: 'LIST_STAT_FAILED' });
+      continue;
+    }
+    if (!isFile) {
+      diagnostics.skipped.push({ ordinal, code: 'NOT_A_REGULAR_FILE' });
+      continue;
+    }
+    const stat = fs.statSync(fullPath);
+    entries.push({
+      fileName,
+      path: fullPath,
+      sizeBytes: stat.size,
+      createdAt: stat.mtime.toISOString(),
+      kind: (fileName.includes('-pre-v') || isRestoreSafetyCopyName(fileName) ? 'auto' : 'manual') as 'manual' | 'auto',
+      schemaVersion: readBackupSchemaVersion(fullPath),
+    });
+  }
+
+  entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return { entries, diagnostics };
+}
+
+export function listBackups(): { fileName: string; path: string; sizeBytes: number; createdAt: string; kind: 'manual' | 'auto'; schemaVersion: number | null }[] {
+  return listBackupsDetailed().entries;
 }
 
 /** Deletes a backup from the managed backups directory after validating filename format. */
@@ -1991,24 +2049,34 @@ export function deleteBackup(fileName: string): void {
 }
 
 /** Returns true if candidate path points to a valid file inside the managed backups directory. */
-export function isManagedBackupFile(candidatePath: string): boolean {
-  if (typeof candidatePath !== 'string' || !candidatePath) return false;
+/**
+ * Why a path is or is not a managed backup. A transient filesystem failure
+ * (REALPATH_FAILED / STAT_FAILED) must stay distinguishable from a file that
+ * genuinely is not a Flo backup, otherwise a passing I/O hiccup reads as
+ * "wrong kind of file" in the operator's dialog.
+ */
+function classifyManagedBackup(candidatePath: string): { ok: true } | { ok: false; code: StartupRestoreRejectionCode } {
+  if (typeof candidatePath !== 'string' || !candidatePath) return { ok: false, code: 'NOT_MANAGED_BACKUP' };
   let resolved: string;
   let backupDir: string;
   try {
     resolved = fs.realpathSync(candidatePath);
     backupDir = fs.realpathSync(getBackupDir());
   } catch {
-    return false;
+    return { ok: false, code: 'REALPATH_FAILED' };
   }
-  if (!resolved.startsWith(backupDir + path.sep)) return false;
+  if (!resolved.startsWith(backupDir + path.sep)) return { ok: false, code: 'NOT_MANAGED_BACKUP' };
   const fileName = path.basename(resolved);
-  if (!fileName.startsWith('flo-backup-') || !fileName.endsWith('.db')) return false;
+  if (!fileName.startsWith('flo-backup-') || !fileName.endsWith('.db')) return { ok: false, code: 'NOT_MANAGED_BACKUP' };
   try {
-    return fs.statSync(resolved).isFile();
+    return fs.statSync(resolved).isFile() ? { ok: true } : { ok: false, code: 'NOT_A_REGULAR_FILE' };
   } catch {
-    return false;
+    return { ok: false, code: 'STAT_FAILED' };
   }
+}
+
+export function isManagedBackupFile(candidatePath: string): boolean {
+  return classifyManagedBackup(candidatePath).ok;
 }
 
 // ── Startup restore (recovery for a blocked migration) ────────────────────
@@ -2031,7 +2099,45 @@ export type StartupRestoreCandidate = {
   schemaVersion: number;
 };
 
-export type StartupRestoreRejection = { fileName: string; reason: string };
+export type StartupRestoreRejection = { fileName: string; reason: string; code?: StartupRestoreRejectionCode };
+
+/**
+ * Why a backup file was not offered. The codes are the only diagnostic detail
+ * that leaves this module: file names and raw error text stay in the dialog,
+ * never in the structured event (see main/startup-restore.ts).
+ *
+ * `LIST_STAT_FAILED` exists because listBackups used to drop an entry whose
+ * lstat failed without leaving any trace, which made a transient filesystem
+ * error look exactly like an empty backups folder.
+ */
+/**
+ * The single source of truth for rejection codes: the union is derived from
+ * this list, so a runtime allowlist can never drift from the type.
+ */
+export const STARTUP_RESTORE_REJECTION_CODES = [
+  'LIST_PATH_REJECTED',
+  'LIST_STAT_FAILED',
+  'BACKUP_DIRECTORY_UNAVAILABLE',
+  'PATH_MISSING',
+  'SYMLINK_BACKUP',
+  'NOT_A_REGULAR_FILE',
+  'REALPATH_FAILED',
+  'STAT_FAILED',
+  'NOT_MANAGED_BACKUP',
+  'ACTIVE_DATABASE',
+  'OPEN_FAILED',
+  'SQLITE_BUSY',
+  'SQLITE_CORRUPT',
+  'INTEGRITY_CHECK_FAILED',
+  'VERSION_MISSING',
+  'NEWER_THAN_BUILD',
+  'META_MISMATCH',
+  'CORE_TABLE_MISSING',
+  'INSPECT_THREW',
+  'UNKNOWN_REJECTION',
+] as const;
+
+export type StartupRestoreRejectionCode = typeof STARTUP_RESTORE_REJECTION_CODES[number];
 
 export type StartupRestoreStep = 'staged' | 'checkpoint' | 'closed' | 'emergency' | 'swap' | 'initialize';
 
@@ -2041,7 +2147,12 @@ export type StartupRestoreStep = 'staged' | 'checkpoint' | 'closed' | 'emergency
  * it; the message states which recovery artifacts are still on disk.
  */
 export class StartupRestoreError extends Error {
-  constructor(message: string, readonly restoreAttempted = false) {
+  constructor(
+    message: string,
+    readonly restoreAttempted = false,
+    /** Whether the emergency copy was written, failed to be written, or never attempted. */
+    readonly emergency: 'not-attempted' | 'created' | 'failed' = 'not-attempted',
+  ) {
     super(message);
     this.name = 'StartupRestoreError';
   }
@@ -2068,16 +2179,22 @@ function inspectWithoutSideEffect<T>(filePath: string, read: () => T): T {
   }
 }
 
-function inspectRestoreDatabaseFile(filePath: string): { ok: true; schemaVersion: number } | { ok: false; reason: string } {
+function inspectRestoreDatabaseFile(filePath: string): { ok: true; schemaVersion: number } | { ok: false; reason: string; code: StartupRestoreRejectionCode } {
   return inspectWithoutSideEffect(filePath, () => readRestoreDatabaseFile(filePath));
 }
 
-function readRestoreDatabaseFile(filePath: string): { ok: true; schemaVersion: number } | { ok: false; reason: string } {
+/** Only these SQLite codes are passed through; anything else collapses to OPEN_FAILED. */
+function openFailureCode(error: unknown): StartupRestoreRejectionCode {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === 'SQLITE_BUSY' || code === 'SQLITE_CORRUPT' ? code : 'OPEN_FAILED';
+}
+
+function readRestoreDatabaseFile(filePath: string): { ok: true; schemaVersion: number } | { ok: false; reason: string; code: StartupRestoreRejectionCode } {
   let candidate: Database.Database;
   try {
     candidate = new Database(filePath, { readonly: true, fileMustExist: true });
-  } catch {
-    return { ok: false, reason: 'the file is not a readable SQLite database' };
+  } catch (openError) {
+    return { ok: false, reason: 'the file is not a readable SQLite database', code: openFailureCode(openError) };
   }
   try {
     let integrity: { integrity_check: string }[];
@@ -2085,18 +2202,18 @@ function readRestoreDatabaseFile(filePath: string): { ok: true; schemaVersion: n
       integrity = candidate.prepare('PRAGMA integrity_check').all() as { integrity_check: string }[];
     } catch (checkError) {
       const message = checkError instanceof Error ? checkError.message : String(checkError);
-      return { ok: false, reason: `the file failed PRAGMA integrity_check (${message})` };
+      return { ok: false, reason: `the file failed PRAGMA integrity_check (${message})`, code: 'INTEGRITY_CHECK_FAILED' };
     }
     if (integrity.length !== 1 || integrity[0].integrity_check !== 'ok') {
-      return { ok: false, reason: 'the file failed PRAGMA integrity_check' };
+      return { ok: false, reason: 'the file failed PRAGMA integrity_check', code: 'INTEGRITY_CHECK_FAILED' };
     }
     const schemaVersion = Number(candidate.pragma('user_version', { simple: true }));
     const tail = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
     if (!Number.isFinite(schemaVersion) || schemaVersion <= 0) {
-      return { ok: false, reason: 'the file does not report a schema version' };
+      return { ok: false, reason: 'the file does not report a schema version', code: 'VERSION_MISSING' };
     }
     if (schemaVersion > tail) {
-      return { ok: false, reason: `the file is schema v${schemaVersion}, newer than this build supports (v${tail})` };
+      return { ok: false, reason: `the file is schema v${schemaVersion}, newer than this build supports (v${tail})`, code: 'NEWER_THAN_BUILD' };
     }
     let metadataVersion: string | undefined;
     try {
@@ -2106,38 +2223,46 @@ function readRestoreDatabaseFile(filePath: string): { ok: true; schemaVersion: n
     if (metadataVersion !== undefined) {
       const parsed = parseCanonicalSchemaVersion(metadataVersion);
       if (parsed === null || parsed === undefined || parsed !== schemaVersion) {
-        return { ok: false, reason: 'the backup metadata does not match its SQLite header' };
+        return { ok: false, reason: 'the backup metadata does not match its SQLite header', code: 'META_MISMATCH' };
       }
     }
     const tables = new Set(getTables(candidate));
     const missing = STARTUP_RESTORE_CORE_TABLES.filter((table) => !tables.has(table));
     if (missing.length > 0) {
-      return { ok: false, reason: `the file is missing required table(s): ${missing.join(', ')}` };
+      return { ok: false, reason: `the file is missing required table(s): ${missing.join(', ')}`, code: 'CORE_TABLE_MISSING' };
     }
     return { ok: true, schemaVersion };
   } catch (error) {
-    return { ok: false, reason: `the file could not be inspected (${error instanceof Error ? error.message : 'unknown error'})` };
+    return { ok: false, reason: `the file could not be inspected (${error instanceof Error ? error.message : 'unknown error'})`, code: 'INSPECT_THREW' };
   } finally {
     try { candidate.close(); } catch { /* already closed */ }
   }
 }
 
 /** Full eligibility check for a restore source: managed location + file quality. */
-export function validateStartupRestoreCandidate(candidatePath: string): { ok: true; schemaVersion: number } | { ok: false; reason: string } {
-  if (typeof candidatePath !== 'string' || !candidatePath) return { ok: false, reason: 'no backup path was provided' };
+export function validateStartupRestoreCandidate(candidatePath: string): { ok: true; schemaVersion: number } | { ok: false; reason: string; code: StartupRestoreRejectionCode } {
+  if (typeof candidatePath !== 'string' || !candidatePath) return { ok: false, reason: 'no backup path was provided', code: 'PATH_MISSING' };
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(candidatePath);
   } catch {
-    return { ok: false, reason: 'the backup file no longer exists or cannot be read' };
+    return { ok: false, reason: 'the backup file no longer exists or cannot be read', code: 'PATH_MISSING' };
   }
-  if (stat.isSymbolicLink()) return { ok: false, reason: 'the backup file is a symbolic link' };
-  if (!stat.isFile()) return { ok: false, reason: 'the backup is not a regular file' };
-  if (!isManagedBackupFile(candidatePath)) return { ok: false, reason: 'the file is not a Flo-managed backup' };
+  if (stat.isSymbolicLink()) return { ok: false, reason: 'the backup file is a symbolic link', code: 'SYMLINK_BACKUP' };
+  if (!stat.isFile()) return { ok: false, reason: 'the backup is not a regular file', code: 'NOT_A_REGULAR_FILE' };
+  const managed = classifyManagedBackup(candidatePath);
+  if (managed.ok === false) {
+    // A transient realpath/stat failure is reported as such instead of being
+    // folded into "not a Flo-managed backup".
+    const reason = managed.code === 'REALPATH_FAILED' || managed.code === 'STAT_FAILED'
+      ? 'the backup file could not be inspected because the filesystem call failed'
+      : 'the file is not a Flo-managed backup';
+    return { ok: false, reason, code: managed.code };
+  }
   const dbPath = getDbPath();
   for (const suffix of ['', '-wal', '-shm']) {
     if (isLiveDatabaseTarget(candidatePath, `${dbPath}${suffix}`)) {
-      return { ok: false, reason: 'the file is the active database, not a backup' };
+      return { ok: false, reason: 'the file is the active database, not a backup', code: 'ACTIVE_DATABASE' };
     }
   }
   return inspectRestoreDatabaseFile(candidatePath);
@@ -2147,10 +2272,12 @@ export function validateStartupRestoreCandidate(candidatePath: string): { ok: tr
 export function discoverStartupRestoreBackups(): {
   usable: StartupRestoreCandidate[];
   rejected: StartupRestoreRejection[];
+  diagnostics: StartupRestoreDiscoveryDiagnostics;
 } {
+  const listed = listBackupsDetailed();
   const usable: StartupRestoreCandidate[] = [];
   const rejected: StartupRestoreRejection[] = [];
-  for (const entry of listBackups()) {
+  for (const entry of listed.entries) {
     const verdict = validateStartupRestoreCandidate(entry.path);
     if (verdict.ok === true) {
       usable.push({
@@ -2162,10 +2289,10 @@ export function discoverStartupRestoreBackups(): {
         schemaVersion: verdict.schemaVersion,
       });
     } else {
-      rejected.push({ fileName: entry.fileName, reason: verdict.reason });
+      rejected.push({ fileName: entry.fileName, reason: verdict.reason, code: verdict.code });
     }
   }
-  return { usable, rejected };
+  return { usable, rejected, diagnostics: listed.diagnostics };
 }
 
 /** Filename, real timestamp, schema version and size — everything an operator needs to tell backups apart. */
@@ -2317,6 +2444,9 @@ export function performStartupRestore(
 
   let touchedLive = false;
   let journalWritten = false;
+  // Diagnostic only: records whether the emergency copy was written, failed to
+  // be written, or never reached. It never influences the restore itself.
+  let emergencyState: 'not-attempted' | 'created' | 'failed' = 'not-attempted';
   const cleanupStaged = (): void => {
     try { if (fs.existsSync(stagedPath)) fs.unlinkSync(stagedPath); } catch { console.warn('[DB] Could not remove staged restore file'); }
   };
@@ -2335,6 +2465,7 @@ export function performStartupRestore(
     closeDatabase();
 
     onStep?.('emergency');
+    emergencyState = 'failed';
     if (fs.existsSync(emergencyPath)) throw new Error('the emergency recovery path already exists');
     fs.copyFileSync(dbPath, emergencyPath);
     syncFile(emergencyPath);
@@ -2343,6 +2474,7 @@ export function performStartupRestore(
       try { fs.unlinkSync(emergencyPath); } catch { console.warn('[DB] Could not remove an unverified emergency copy'); }
       throw new Error(`the emergency copy failed verification: ${emergencyVerdict.reason}`);
     }
+    emergencyState = 'created';
 
     writeStartupRestoreJournal(journalPath, { phase: 'prepared', dbPath: path.resolve(dbPath), stagedPath, emergencyPath });
     journalWritten = true;
@@ -2395,7 +2527,7 @@ export function performStartupRestore(
     if (fs.existsSync(emergencyPath)) {
       console.warn(`[DB] Startup restore left its emergency copy in place: ${emergencyPath}`);
     }
-    throw new StartupRestoreError(`Startup restore failed: ${message}${rollbackNote}`, touchedLive);
+    throw new StartupRestoreError(`Startup restore failed: ${message}${rollbackNote}`, touchedLive, emergencyState);
   }
 }
 

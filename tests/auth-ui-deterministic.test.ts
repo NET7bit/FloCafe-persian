@@ -56,12 +56,28 @@ async function run() {
   assert.equal(getLandingPage(tenantWith('whatsapp.use')), '/whatsapp', 'WhatsApp-only staff land on WhatsApp');
   assert.equal(getLandingPage(tenantWith('unknown.permission')), '/auth/login', 'staff without a page permission fall back to login');
 
-  const landingPermissions = new Map<string, string>(
-    LANDING_PAGE_CANDIDATES.map(([permission, route]: readonly [string, string]) => [route, permission]),
-  );
-  for (const [route, permission] of PAGE_PERMISSIONS) {
-    assert.equal(landingPermissions.get(route), permission, `${route} has a landing-page candidate with matching permission`);
+  // A route can accept more than one permission: /payroll is reachable with
+  // either payroll.view or payroll.manage. The map therefore keeps a set per
+  // route — a single-value map would let the second entry for a duplicated
+  // route silently overwrite the first.
+  const landingPermissions = new Map<string, Set<string>>();
+  for (const [permission, route] of LANDING_PAGE_CANDIDATES) {
+    const permissions = landingPermissions.get(route) ?? new Set<string>();
+    permissions.add(permission);
+    landingPermissions.set(route, permissions);
   }
+  for (const [route, permission] of PAGE_PERMISSIONS) {
+    assert.ok(
+      landingPermissions.get(route)?.has(permission),
+      `${route} has a landing-page candidate that accepts ${permission}`,
+    );
+  }
+
+  // Both payroll permissions must survive the map, and either one must land.
+  assert.equal(landingPermissions.get('/payroll')?.size, 2, '/payroll keeps both payroll permissions');
+  assert.equal(getLandingPage(tenantWith('payroll.view')), '/payroll', 'view-only staff land on Payroll');
+  assert.equal(getLandingPage(tenantWith('payroll.manage')), '/payroll', 'manage-only staff land on Payroll');
+  assert.equal(getLandingPage({ permission_ids: [] }), '/auth/login', 'staff with no page permission land on login');
 
   // ── 3. Storage-write failure surfaces StorageUnavailableError and leaves state logged out ──
   const serverApi = {

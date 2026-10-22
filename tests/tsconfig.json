@@ -10,7 +10,12 @@
     "strict": false,
     "rootDir": "..",
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "paths": {
+      "@print/width": ["../shared/print/width"],
+      "@print/document": ["../shared/print/document"],
+      "@/lib/i18n/languages": ["../frontend/src/lib/i18n/languages"]
+    }
   },
   "include": ["../tests/**/*", "../main/**/*", "../shared/**/*"]
 }

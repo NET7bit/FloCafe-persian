@@ -688,6 +688,509 @@ async function scenarioFlowDecisions(): Promise<void> {
   }
 }
 
+// ═══ G. Diagnostic event ══════════════════════════════════════════════════
+
+/**
+ * The event must name *why* the flow settled where it did. Before this, an
+ * empty folder, an unreadable folder and a folder whose entries all failed
+ * inspection were indistinguishable from outside: all three returned
+ * 'unchanged' after a single dialog.
+ */
+async function scenarioDiagnostics(): Promise<void> {
+  console.log('\n[G] the diagnostic event names the branch the flow took');
+
+  const { __setStartupRestoreDiagnosticSinkForTests, __setStartupRestoreClockForTests } = require('../main/startup-restore');
+  // Capture the exact JSON the production sink would emit, not a live reference:
+  // a reference would hide any field mutated after the event was sent.
+  const rawEvents: string[] = [];
+  const events: any[] = [];
+  const capture = (event: any) => {
+    const json = JSON.stringify(event);
+    rawEvents.push(json);
+    events.push(JSON.parse(json));
+  };
+  __setStartupRestoreDiagnosticSinkForTests(capture);
+  const lastEvent = () => events[events.length - 1];
+  const lastRaw = () => rawEvents[rawEvents.length - 1];
+  const resetEvents = () => { events.length = 0; rawEvents.length = 0; };
+
+  const { sourcePath, blockError } = await setupBlockedWorld();
+  const candidate = (name: string) => ({
+    fileName: name,
+    path: path.join(backupDir, name),
+    sizeBytes: 4096,
+    createdAt: new Date().toISOString(),
+    kind: 'auto' as const,
+    schemaVersion: 98,
+  });
+  const diagnostics = (overrides: Record<string, unknown> = {}) => ({
+    entriesObserved: 0,
+    entriesSkippedWithError: 0,
+    skipped: [],
+    discoveryError: null,
+    ...overrides,
+  });
+  const noopValidate = () => ({ ok: true as const, schemaVersion: 98 });
+  const okRestore = () => ({ emergencyPath: path.join(testDir, 'emergency.db'), restoredSchemaVersion: 98 });
+
+  // G1 — the folder really is empty.
+  {
+    resetEvents();
+    const outcome = await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1]).dialog,
+      ports: {
+        discover: () => ({ usable: [], rejected: [], diagnostics: diagnostics() }),
+        validate: noopValidate,
+        restore: okRestore,
+      },
+    });
+    const event = lastEvent();
+    eq(outcome, 'unchanged', 'G1 empty folder still returns unchanged');
+    eq(event.outcomeReason, 'UNCHANGED_LIST_EMPTY', 'G1 empty folder is reported as LIST_EMPTY');
+    eq(event.counts.entriesObserved, 0, 'G1 empty folder observed zero entries');
+    eq(event.counts.entriesSkippedWithError, 0, 'G1 empty folder has no skipped entries');
+  }
+
+  // G2 — listing itself failed: this must not read as an empty folder.
+  {
+    resetEvents();
+    const outcome = await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1]).dialog,
+      ports: {
+        discover: () => { throw new Error('EACCES: permission denied'); },
+        validate: noopValidate,
+        restore: okRestore,
+      },
+    });
+    const event = lastEvent();
+    eq(outcome, 'unchanged', 'G2 failed listing still returns unchanged');
+    eq(event.outcomeReason, 'UNCHANGED_LIST_FAILED', 'G2 failed listing is reported as LIST_FAILED');
+    eq(event.counts.entriesObserved, null, 'G2 failed listing reports null, not zero');
+  }
+
+  // G3 — entries existed but every one failed validation.
+  {
+    resetEvents();
+    await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1]).dialog,
+      ports: {
+        discover: () => ({
+          usable: [],
+          rejected: [{ fileName: 'flo-backup-a.db', reason: 'corrupt', code: 'INTEGRITY_CHECK_FAILED' }],
+          diagnostics: diagnostics({ entriesObserved: 1 }),
+        }),
+        validate: noopValidate,
+        restore: okRestore,
+      },
+    });
+    const event = lastEvent();
+    eq(event.outcomeReason, 'UNCHANGED_ALL_REJECTED', 'G3 rejected candidates are reported as ALL_REJECTED');
+    eq(event.rejections[0]?.reasonCode, 'INTEGRITY_CHECK_FAILED', 'G3 the rejection carries its validation code');
+  }
+
+  // G4 — the case that used to vanish: an entry dropped by a failed lstat.
+  {
+    resetEvents();
+    const outcome = await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1]).dialog,
+      ports: {
+        discover: () => ({
+          usable: [],
+          rejected: [],
+          diagnostics: diagnostics({
+            entriesObserved: 1,
+            entriesSkippedWithError: 1,
+            skipped: [{ ordinal: 1, code: 'LIST_STAT_FAILED' }],
+          }),
+        }),
+        validate: noopValidate,
+        restore: okRestore,
+      },
+    });
+    const event = lastEvent();
+    eq(outcome, 'unchanged', 'G4 a skipped entry still leaves the flow unchanged');
+    eq(event.outcomeReason, 'UNCHANGED_LIST_FAILED', 'G4 a skipped entry is never reported as an empty folder');
+    eq(event.counts.entriesObserved, 1, 'G4 the observed entry is counted');
+    eq(event.counts.entriesSkippedWithError, 1, 'G4 the operational skip is counted');
+    eq(event.counts.candidatesRejected, 0, 'G4 a skipped entry is not a rejected candidate');
+    eq(event.counts.candidatesUsable, 0, 'G4 a skipped entry is not a usable candidate');
+    eq(event.counts.candidatesAcceptedForInspection, 0, 'G4 the skipped entry never reached inspection');
+    eq(event.rejections[0]?.reasonCode, 'LIST_STAT_FAILED', 'G4 the skip keeps its reason code');
+    eq(event.rejections[0]?.phase, 'list', 'G4 the skip is attributed to the list phase');
+    eq(JSON.parse(lastRaw()).outcomeReason, 'UNCHANGED_LIST_FAILED', 'G4 the serialized event reports the same reason');
+  }
+
+  // G5..G7 — the three ways an operator can leave without restoring.
+  {
+    resetEvents();
+    await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([0]).dialog,
+      ports: { discover: () => ({ usable: [candidate('a.db')], rejected: [] }), validate: noopValidate, restore: okRestore },
+    });
+    eq(lastEvent().outcomeReason, 'UNCHANGED_DECLINED', 'G5 declining the offer is its own reason');
+  }
+  {
+    resetEvents();
+    await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1], [{ canceled: true, filePaths: [] }]).dialog,
+      ports: {
+        discover: () => ({ usable: [candidate('a.db'), candidate('b.db')], rejected: [] }),
+        validate: noopValidate,
+        restore: okRestore,
+      },
+    });
+    eq(lastEvent().outcomeReason, 'UNCHANGED_SELECT_CANCELLED', 'G6 cancelling the picker is its own reason');
+  }
+  {
+    resetEvents();
+    await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1, 0]).dialog,
+      ports: { discover: () => ({ usable: [candidate('a.db')], rejected: [] }), validate: noopValidate, restore: okRestore },
+    });
+    eq(lastEvent().outcomeReason, 'UNCHANGED_CONFIRM_DECLINED', 'G7 declining the confirmation is its own reason');
+  }
+
+  // G8 — success and the emergency copy it implies.
+  {
+    resetEvents();
+    const outcome = await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1, 1]).dialog,
+      ports: { discover: () => ({ usable: [candidate('a.db')], rejected: [] }), validate: noopValidate, restore: okRestore },
+    });
+    const event = lastEvent();
+    eq(outcome, 'restored', 'G8 a successful restore returns restored');
+    eq(event.outcomeReason, 'RESTORED', 'G8 success is reported as RESTORED');
+    eq(event.emergencyBackup, 'created', 'G8 success records the emergency copy as created');
+  }
+
+  // G9/G10 — a failed restore carries the emergency-copy state it actually reached.
+  {
+    resetEvents();
+    const outcome = await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1, 1, 1]).dialog,
+      ports: {
+        discover: () => ({ usable: [candidate('a.db')], rejected: [] }),
+        validate: noopValidate,
+        restore: () => { throw new dbModule.StartupRestoreError('rollback happened', true, 'created'); },
+      },
+    });
+    const event = lastEvent();
+    eq(outcome, 'failed', 'G9 a restore failure still returns failed');
+    eq(event.outcomeReason, 'FAILED_RESTORE', 'G9 failure is reported as FAILED_RESTORE');
+    eq(event.emergencyBackup, 'created', 'G9 the event reports the emergency copy that was written');
+  }
+  {
+    resetEvents();
+    await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1, 1, 1]).dialog,
+      ports: {
+        discover: () => ({ usable: [candidate('a.db')], rejected: [] }),
+        validate: noopValidate,
+        restore: () => { throw new dbModule.StartupRestoreError('emergency copy failed', false, 'failed'); },
+      },
+    });
+    eq(lastEvent().emergencyBackup, 'failed', 'G10 an emergency-copy failure is reported as failed');
+  }
+
+  // G11 — a broken logger must not change the outcome.
+  {
+    resetEvents();
+    // Baseline run with a healthy logger, for an exact comparison.
+    const healthyDialog = scriptedDialog([1, 1]);
+    let restoreCalls = 0;
+    const healthyOutcome = await runStartupRestoreFlow({
+      error: blockError,
+      dialog: healthyDialog.dialog,
+      ports: {
+        discover: () => ({ usable: [candidate('a.db')], rejected: [], diagnostics: diagnostics({ entriesObserved: 1 }) }),
+        validate: noopValidate,
+        restore: () => { restoreCalls += 1; return okRestore(); },
+      },
+    });
+    const healthyEvent = lastEvent();
+    const healthyMessages = healthyDialog.calls.filter((c) => c.kind === 'message').length;
+
+    resetEvents();
+    __setStartupRestoreDiagnosticSinkForTests(() => { throw new Error('logger exploded'); });
+    let outcome: string | null = null;
+    let crashed = false;
+    const brokenDialog = scriptedDialog([1, 1]);
+    let brokenRestoreCalls = 0;
+    try {
+      outcome = await runStartupRestoreFlow({
+        error: blockError,
+        dialog: brokenDialog.dialog,
+        ports: {
+          discover: () => ({ usable: [candidate('a.db')], rejected: [], diagnostics: diagnostics({ entriesObserved: 1 }) }),
+          validate: noopValidate,
+          restore: () => { brokenRestoreCalls += 1; return okRestore(); },
+        },
+      });
+    } catch { crashed = true; }
+    __setStartupRestoreDiagnosticSinkForTests(capture);
+
+    eq(crashed, false, 'G11 a throwing logger does not crash the flow');
+    eq(outcome, healthyOutcome, 'G11 a throwing logger leaves the outcome unchanged');
+    eq(brokenRestoreCalls, restoreCalls, 'G11 a throwing logger does not change how often restore runs');
+    eq(brokenDialog.calls.filter((c) => c.kind === 'message').length, healthyMessages,
+      'G11 a throwing logger does not change the dialog sequence');
+    eq(events.length, 0, 'G11 the throwing logger produced no event, and nothing else broke');
+  }
+
+  // G12 — the not-offered branches are distinguishable too.
+  {
+    resetEvents();
+    const outcome = await runStartupRestoreFlow({ error: new Error('not a migration problem'), dialog: scriptedDialog([1]).dialog });
+    eq(outcome, 'not-offered', 'G12a a non-migration error is not offered');
+    eq(lastEvent().outcomeReason, 'NOT_OFFERED_NO_DIAGNOSTIC', 'G12a a non-migration error has its own reason');
+  }
+  {
+    resetEvents();
+    const outcome = await runStartupRestoreFlow({ error: blockError, ports: {} as any });
+    eq(outcome, 'not-offered', 'G12b missing ports are not offered');
+    eq(lastEvent().outcomeReason, 'NOT_OFFERED_NO_PORTS', 'G12b missing ports have their own reason');
+  }
+  {
+    resetEvents();
+    const outcome = await runStartupRestoreFlow({
+      error: blockError,
+      dialog: THROWING_DIALOG as any,
+      ports: { discover: () => ({ usable: [candidate('a.db')], rejected: [] }), validate: noopValidate, restore: okRestore },
+    });
+    eq(outcome, 'not-offered', 'G12c an unavailable dialog is not offered');
+    eq(lastEvent().outcomeReason, 'NOT_OFFERED_DIALOG_FAILED', 'G12c an unavailable dialog has its own reason');
+  }
+
+  // G13 — privacy: the serialized event carries no path, file name or raw error text.
+  {
+    resetEvents();
+    await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1]).dialog,
+      ports: {
+        discover: () => ({
+          usable: [],
+          rejected: [{ fileName: 'flo-backup-SECRET-NAME.db', reason: 'secret detail C:\\Users\\someone', code: 'OPEN_FAILED' }],
+          diagnostics: diagnostics({ entriesObserved: 1 }),
+        }),
+        validate: noopValidate,
+        restore: okRestore,
+      },
+    });
+    const serialized = JSON.stringify(lastEvent());
+    eq(/SECRET-NAME/.test(serialized), false, 'G13 the backup file name never reaches the event');
+    eq(/Users|AppData|secret detail/.test(serialized), false, 'G13 no path or raw rejection text reaches the event');
+    eq(typeof lastEvent().correlationId, 'string', 'G13 the event carries an opaque correlation id');
+
+    // The key set is the contract: an unexpected field is a leak by definition.
+    const keysOf = (value: any) => Object.keys(value).sort().join(',');
+    eq(keysOf(lastEvent()),
+      'correlationId,counts,discoveryError,emergencyBackup,event,outcome,outcomeReason,phase,rejections,schemaVersion,timingsMs',
+      'G13 the event has exactly the contracted root keys');
+    eq(keysOf(lastEvent().counts),
+      'candidatesAcceptedForInspection,candidatesRejected,candidatesUsable,entriesObserved,entriesSkippedWithError',
+      'G13 counts has exactly the contracted keys');
+    eq(keysOf(lastEvent().timingsMs), 'dialog,discover,restore', 'G13 timingsMs has exactly the contracted keys');
+    eq(keysOf(lastEvent().rejections[0]), 'ordinal,phase,reasonCode', 'G13 each rejection has exactly three keys');
+    eq(lastEvent().schemaVersion, 2, 'G13 the event declares schema version 2');
+  }
+
+  // G14 — the real discovery path reports a real lstat failure instead of dropping it.
+  {
+    resetEvents();
+    const sourceName = path.basename(sourcePath);
+    const realLstat = fs.lstatSync;
+    (fs as any).lstatSync = function (target: any, ...rest: unknown[]) {
+      if (String(target).includes(sourceName)) throw new Error('EBUSY: injected lstat failure');
+      return (realLstat as any).call(fs, target, ...rest);
+    };
+    let discovered: any = null;
+    try {
+      discovered = dbModule.discoverStartupRestoreBackups();
+    } finally {
+      (fs as any).lstatSync = realLstat;
+    }
+    eq(discovered.diagnostics.entriesObserved, 1, 'G14 the real listing still observes the entry');
+    eq(discovered.diagnostics.entriesSkippedWithError, 1, 'G14 a failed lstat is counted, not silently dropped');
+    eq(discovered.diagnostics.skipped[0]?.code, 'LIST_STAT_FAILED', 'G14 the skip carries LIST_STAT_FAILED');
+    eq(discovered.usable.length, 0, 'G14 the entry does not become a candidate');
+    eq(fs.existsSync(sourcePath), true, 'G14 the backup file itself was not touched');
+  }
+
+  // ═══ F1 — phase timings are stamped before the event is serialized ═══════
+  {
+    let tick = 1000;
+    __setStartupRestoreClockForTests(() => (tick += 10));
+    const withOneCandidate = () => ({
+      discover: () => ({ usable: [candidate('a.db')], rejected: [], diagnostics: diagnostics({ entriesObserved: 1 }) }),
+      validate: noopValidate,
+      restore: okRestore,
+    });
+
+    resetEvents();
+    const declined = await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([0]).dialog,
+      ports: withOneCandidate(),
+    });
+    let json = JSON.parse(lastRaw());
+    eq(declined, 'unchanged', 'F1a a declined offer still returns unchanged');
+    eq(json.timingsMs.discover, 10, 'F1a discover timing is the measured duration');
+    eq(json.timingsMs.dialog, 10, 'F1a dialog timing is measured, not left at zero');
+    eq(json.timingsMs.restore, null, 'F1a restore never ran, so it is null and not zero');
+
+    resetEvents();
+    await runStartupRestoreFlow({ error: blockError, dialog: scriptedDialog([1, 1]).dialog, ports: withOneCandidate() });
+    json = JSON.parse(lastRaw());
+    eq(json.outcome, 'restored', 'F1b the successful path still restores');
+    eq(json.timingsMs.discover, 10, 'F1b discover timing is measured');
+    eq(json.timingsMs.dialog, 10, 'F1b dialog timing is measured on the success path');
+    eq(json.timingsMs.restore, 10, 'F1b restore timing is measured on the success path');
+
+    resetEvents();
+    await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1, 1, 1]).dialog,
+      ports: {
+        discover: () => ({ usable: [candidate('a.db')], rejected: [], diagnostics: diagnostics({ entriesObserved: 1 }) }),
+        validate: noopValidate,
+        restore: () => { throw new dbModule.StartupRestoreError('boom', true, 'created'); },
+      },
+    });
+    json = JSON.parse(lastRaw());
+    eq(json.outcome, 'failed', 'F1c the failing path still fails');
+    eq(json.timingsMs.dialog, 10, 'F1c dialog timing is measured on the failure path');
+    eq(json.timingsMs.restore, 10, 'F1c restore timing is measured on the failure path');
+
+    resetEvents();
+    await runStartupRestoreFlow({ error: blockError, ports: {} as any });
+    json = JSON.parse(lastRaw());
+    eq(json.timingsMs.discover, null, 'F1d a flow that never discovers reports null');
+    eq(json.timingsMs.dialog, null, 'F1d a flow that never opens a dialog reports null');
+    eq(json.timingsMs.restore, null, 'F1d a flow that never restores reports null');
+
+    __setStartupRestoreClockForTests(null);
+  }
+
+  // ═══ F2 — a discovery failure is not a rejected candidate ════════════════
+  {
+    resetEvents();
+    const outcome = await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1]).dialog,
+      ports: { discover: () => { throw new Error('EACCES: permission denied'); }, validate: noopValidate, restore: okRestore },
+    });
+    const event = lastEvent();
+    eq(outcome, 'unchanged', 'F2 a discovery failure still returns unchanged');
+    eq(event.counts.entriesObserved, null, 'F2 nothing could be observed, so the count is null');
+    eq(event.counts.candidatesRejected, 0, 'F2 no candidate is counted as rejected');
+    eq(event.counts.candidatesUsable, 0, 'F2 no candidate is counted as usable');
+    eq(event.discoveryError, 'BACKUP_DIRECTORY_UNAVAILABLE', 'F2 the discovery failure has its own field');
+    eq(event.rejections[0]?.phase, 'discovery', 'F2 the failure is attributed to discovery, not inspection');
+    eq(event.rejections[0]?.reasonCode, 'BACKUP_DIRECTORY_UNAVAILABLE', 'F2 the discovery reason code survives');
+  }
+
+  // ═══ F3 — a non-file entry is not an operational failure ═════════════════
+  {
+    resetEvents();
+    const outcome = await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1]).dialog,
+      ports: {
+        discover: () => ({
+          usable: [],
+          rejected: [],
+          diagnostics: diagnostics({
+            entriesObserved: 1,
+            entriesSkippedWithError: 0,
+            skipped: [{ ordinal: 1, code: 'NOT_A_REGULAR_FILE' }],
+          }),
+        }),
+        validate: noopValidate,
+        restore: okRestore,
+      },
+    });
+    const event = lastEvent();
+    eq(outcome, 'unchanged', 'F3 a non-file entry still returns unchanged');
+    eq(event.outcomeReason, 'UNCHANGED_ALL_REJECTED', 'F3 a non-file entry is not reported as an operational failure');
+    eq(event.counts.entriesSkippedWithError, 0, 'F3 the error counter stays at zero');
+    eq(event.counts.candidatesUsable, 0, 'F3 the entry never becomes a usable candidate');
+    eq(event.counts.candidatesRejected, 0, 'F3 the entry is not counted as a rejected candidate');
+    eq(event.rejections[0]?.reasonCode, 'NOT_A_REGULAR_FILE', 'F3 the entry keeps its skip reason');
+  }
+
+  // ═══ F4 — an unknown rejection code never reaches the event ══════════════
+  {
+    resetEvents();
+    await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1]).dialog,
+      ports: {
+        discover: () => ({
+          usable: [],
+          rejected: [{ fileName: 'x', reason: 'y', code: 'C:\\Users\\someone\\SECRET-NAME' as any }],
+          diagnostics: diagnostics({ entriesObserved: 1 }),
+        }),
+        validate: noopValidate,
+        restore: okRestore,
+      },
+    });
+    eq(lastEvent().rejections[0]?.reasonCode, 'UNKNOWN_REJECTION', 'F4 an unknown code collapses to UNKNOWN_REJECTION');
+    eq(/SECRET-NAME|Users/.test(lastRaw()), false, 'F4 a hostile code never reaches the serialized event');
+  }
+
+  // ═══ F5 — emergencyBackup is derived, not assumed ════════════════════════
+  {
+    resetEvents();
+    await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1, 1]).dialog,
+      ports: {
+        discover: () => ({ usable: [candidate('a.db')], rejected: [], diagnostics: diagnostics({ entriesObserved: 1 }) }),
+        validate: noopValidate,
+        restore: () => ({ emergencyPath: '', restoredSchemaVersion: 98 }),
+      },
+    });
+    eq(lastEvent().emergencyBackup, 'not-attempted', 'F5 success without an emergency path is not claimed as created');
+
+    resetEvents();
+    await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1, 1]).dialog,
+      ports: {
+        discover: () => ({ usable: [candidate('a.db')], rejected: [], diagnostics: diagnostics({ entriesObserved: 1 }) }),
+        validate: noopValidate,
+        restore: okRestore,
+      },
+    });
+    eq(lastEvent().emergencyBackup, 'created', 'F5 a returned emergency path is reported as created');
+
+    resetEvents();
+    await runStartupRestoreFlow({
+      error: blockError,
+      dialog: scriptedDialog([1, 1, 1]).dialog,
+      ports: {
+        discover: () => ({ usable: [candidate('a.db')], rejected: [], diagnostics: diagnostics({ entriesObserved: 1 }) }),
+        validate: noopValidate,
+        restore: () => { throw new dbModule.StartupRestoreError('emergency failed', false, 'failed'); },
+      },
+    });
+    eq(lastEvent().emergencyBackup, 'failed', 'F5 an emergency-copy failure is reported as failed');
+  }
+
+  __setStartupRestoreDiagnosticSinkForTests(null);
+}
+
 // ═══ summary ═══════════════════════════════════════════════════════════════
 
 async function main(): Promise<void> {
@@ -696,6 +1199,7 @@ async function main(): Promise<void> {
   await scenarioRestoreSuccess();
   await scenarioRefusalsAndFailures();
   await scenarioFlowDecisions();
+  await scenarioDiagnostics();
 
   console.log(`\nstartup-restore: ${passed} passed, ${failed} failed`);
   restoreRegistry();
