@@ -32,6 +32,7 @@ import {
   getIntegrityChecks,
 } from '../services/accounting-reports';
 import { getReconciliation } from '../services/accounting-reconciliation';
+import { listUnresolvedPayrollEvents, reprocessPayrollAccounting } from '../services/accounting-payroll-adapter';
 
 const router = Router();
 
@@ -289,6 +290,22 @@ router.get('/reports/integrity', requirePermission('accounting.view'), (_req: Re
   } catch (error: unknown) {
     sendError(res, error);
   }
+});
+
+router.get('/payroll/unresolved', requirePermission('accounting.view'), (_req: Request, res: Response) => {
+  try { res.json({ events: listUnresolvedPayrollEvents() }); }
+  catch (error: unknown) { sendError(res, error); }
+});
+
+router.post('/payroll/:kind/:id/reprocess', requirePermission('accounting.manage'), (req: Request, res: Response) => {
+  try {
+    const kind = String(req.params.kind);
+    if (!['run', 'payment', 'withholding'].includes(kind)) return res.status(400).json({ error: 'Invalid payroll event kind' });
+    const actor = actorId(req);
+    if (!actor) return res.status(403).json({ error: 'Authentication required' });
+    const result = reprocessPayrollAccounting(kind as 'run' | 'payment' | 'withholding', String(req.params.id), actor);
+    res.json({ result });
+  } catch (error: unknown) { sendError(res, error); }
 });
 
 export const accountingRoutes = router;

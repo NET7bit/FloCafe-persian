@@ -155,6 +155,8 @@ export const PERMISSION_LABEL_KEYS = {
   'accounting.view': 'accountingView',
   'accounting.entry.manage': 'accountingEntryManage',
   'accounting.manage': 'accountingManage',
+  'payroll.view': 'payrollView',
+  'payroll.manage': 'payrollManage',
 } as const satisfies Record<PermissionId, PermissionMatrixCapabilityKey>;
 
 /** Permission area → area heading (exhaustively typed against `PermissionArea`). */
@@ -178,6 +180,7 @@ export const PERMISSION_AREA_KEYS = {
   apps: 'apps',
   support: 'support',
   accounting: 'accounting',
+  payroll: 'payroll',
 } as const satisfies Record<PermissionArea, PermissionMatrixAreaKey>;
 
 /** Table status → label (exhaustively typed against `Table['status']`). */

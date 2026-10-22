@@ -197,6 +197,7 @@
   "test:accounting-expenses-adapter",
   "test:accounting-receivables-adapter",
   "test:accounting-cogs-adapter",
+  "test:payroll-accounting",
   "test:migration-v104-cogs",
   "test:migration-convergence",
   "test:startup-restore",

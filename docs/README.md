@@ -117,5 +117,6 @@ COGS), so they are deliberately not part of the shared architecture/reference st
 | [operations-runbook.md](operations-runbook.md) | Operator runbook: daily health, backup/retention, log locations, incident playbook, LAN trust boundary, restore rehearsal, and the restaurant-day UAT procedure. |
 | [accounting-architecture-plan.md](accounting-architecture-plan.md) | Accounting v1 architecture (approved stages 2–5): seeded chart of accounts, append-only journals with derived balances, fiscal-gated insert paths, module adapters, reports and reconciliation. |
 | [accounting-current-state.md](accounting-current-state.md) | Inspect-only survey of the pre-accounting money model: legacy sales core versus the fork's financial modules, with a repository evidence table. |
+| [payroll-accounting.md](payroll-accounting.md) | Manual payroll accrual, employee and deduction payments, permissions, and ledger mapping. |
 | [accounting-milestone-plan.md](accounting-milestone-plan.md) | Planning-only milestone plan for Accounting v1; delivered through the accounting implementation stages. |
 | [accounting-scope-review.md](accounting-scope-review.md) | Scope boundary review splitting accounting capabilities into v1 / later / out of scope. |

@@ -22,7 +22,8 @@ export type PermissionArea =
   | 'system'
   | 'apps'
   | 'support'
-  | 'accounting';
+  | 'accounting'
+  | 'payroll';
 
 export type PermissionRisk = 'standard' | 'sensitive' | 'destructive';
 
@@ -134,6 +135,8 @@ export const PERMISSION_DEFINITIONS = [
   { id: 'accounting.view', area: 'accounting', defaultRoles: OWNER_MANAGER, configurable: true, risk: 'sensitive' },
   { id: 'accounting.entry.manage', area: 'accounting', defaultRoles: OWNER_MANAGER, configurable: true, risk: 'sensitive' },
   { id: 'accounting.manage', area: 'accounting', defaultRoles: OWNER, configurable: true, risk: 'destructive' },
+  { id: 'payroll.view', area: 'payroll', defaultRoles: OWNER, configurable: true, risk: 'sensitive' },
+  { id: 'payroll.manage', area: 'payroll', defaultRoles: OWNER, configurable: true, risk: 'destructive' },
 ] as const satisfies readonly PermissionDefinitionShape[];
 
 export type PermissionDefinition = typeof PERMISSION_DEFINITIONS[number];

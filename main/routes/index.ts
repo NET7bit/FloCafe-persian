@@ -21,6 +21,7 @@ import { receivableRoutes } from './receivables';
 import { fiscalPeriodRoutes } from './fiscal-periods';
 import { accountingRoutes } from './accounting';
 import { purchaseReturnRoutes } from './purchase-returns';
+import { payrollRoutes } from './payroll';
 import { recipeRoutes } from './recipes';
 import { tableRoutes } from './tables';
 import { kitchenStationRoutes } from './kitchen-stations';
@@ -113,6 +114,7 @@ export function registerRoutes(app: Express): void {
   app.use('/api/fiscal-periods', fiscalPeriodRoutes);
   app.use('/api/accounting', accountingRoutes);
   app.use('/api/purchase-returns', purchaseReturnRoutes);
+  app.use('/api/payroll', payrollRoutes);
   app.use('/api/recipes', recipeRoutes);
   app.use('/api/tables', tableRoutes);
   app.use('/api/kitchen-stations', kitchenStationRoutes);

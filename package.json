@@ -292,6 +292,7 @@
     "test:accounting-purchases-adapter": "node tests/run-electron-node-test.cjs tests/accounting-purchases-adapter.test.ts",
     "test:accounting-expenses-adapter": "node tests/run-electron-node-test.cjs tests/accounting-expenses-adapter.test.ts",
     "test:accounting-cogs-adapter": "node tests/run-electron-node-test.cjs tests/accounting-cogs-adapter.test.ts",
+    "test:payroll-accounting": "node tests/run-electron-node-test.cjs tests/payroll-accounting.test.ts",
     "test:migration-v104-cogs": "node tests/run-electron-node-test.cjs tests/migration-v104-cogs.test.ts",
     "test:migration-convergence": "node tests/run-electron-node-test.cjs tests/migration-convergence-spec.test.ts",
     "test:startup-restore": "node tests/run-electron-node-test.cjs tests/startup-restore.test.ts",

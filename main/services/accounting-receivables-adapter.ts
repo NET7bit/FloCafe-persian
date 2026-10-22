@@ -36,6 +36,7 @@ const SETTLEMENT_TENDER_ACCOUNTS: Record<string, string> = {
   card: '1010',
   bank_transfer: '1010',
   cheque: '1010',
+  payroll_deduction: '2010',
 };
 
 function skip(reason: string): null {
@@ -82,8 +83,28 @@ export function createSettlementJournal(entryId: string, actorUserId: string): J
     if (!entry) return null;
     const existing = existingSettlementJournal(db, String(entry.id));
     if (existing) return existing;
-    if (entry.entry_type !== 'settlement') {
+    const payrollReversal = entry.entry_type === 'adjustment'
+      && entry.direction === 'debit'
+      && String(entry.reference || '').startsWith('payroll-reversal:');
+    if (entry.entry_type !== 'settlement' && !payrollReversal) {
       return skip(`receivable entry ${entry.id}: entry_type ${entry.entry_type} is outside Milestone D`);
+    }
+    if (payrollReversal) {
+      const amount = Number(entry.amount);
+      if (!Number.isFinite(amount) || amount <= 0) return skip(`payroll reversal ${entry.id}: invalid amount`);
+      return withTxn(() => createJournal({
+        entryDate: String(entry.entry_date),
+        description: `Payroll purchase deduction reversal for customer ${entry.customer_id}`,
+        sourceModule: 'receivables',
+        sourceId: String(entry.id),
+        seq: 1,
+        reference: String(entry.reference),
+        actorUserId,
+        lines: [
+          { accountId: getAccountByCode('1100').id, direction: 'debit', amount, lineDescription: 'restore employee receivable' },
+          { accountId: getAccountByCode('2010').id, direction: 'credit', amount, lineDescription: 'restore payroll payable' },
+        ],
+      }));
     }
     const accountId = entry.payment_method ? SETTLEMENT_TENDER_ACCOUNTS[entry.payment_method] : undefined;
     if (!accountId) {
@@ -175,15 +196,16 @@ export interface ReceivableReprocessResult {
 export function listUnresolvedReceivableSettlements(): UnresolvedReceivableEvent[] {
   const db = getDatabase();
   const missingJournals = db.prepare(`
-    SELECT e.id, e.customer_id, e.entry_date, e.amount, e.payment_method
+    SELECT e.id, e.customer_id, e.entry_date, e.amount, e.payment_method, e.entry_type
     FROM receivable_entries e
-    WHERE e.entry_type = 'settlement'
+    WHERE (e.entry_type = 'settlement'
+      OR (e.entry_type = 'adjustment' AND e.direction = 'debit' AND e.reference LIKE 'payroll-reversal:%'))
       AND NOT EXISTS (
         SELECT 1 FROM journal_entries j
         WHERE j.source_module = 'receivables' AND j.source_id = e.id AND j.seq = 1
       )
     ORDER BY e.entry_date DESC, e.id DESC
-  `).all() as Array<{ id: string; customer_id: string | null; entry_date: string; amount: number; payment_method: string | null }>;
+  `).all() as Array<{ id: string; customer_id: string | null; entry_date: string; amount: number; payment_method: string | null; entry_type: string }>;
 
   const missingReversals = db.prepare(`
     SELECT j.id AS journal_id, j.source_id AS entry_id, j.entry_date, j.reference
@@ -207,7 +229,7 @@ export function listUnresolvedReceivableSettlements(): UnresolvedReceivableEvent
       entry_date: String(row.entry_date),
       amount: Number(row.amount),
       payment_method: row.payment_method ?? null,
-      journalizable: Boolean(row.payment_method && SETTLEMENT_TENDER_ACCOUNTS[row.payment_method]),
+      journalizable: row.entry_type === 'adjustment' || Boolean(row.payment_method && SETTLEMENT_TENDER_ACCOUNTS[row.payment_method]),
     })),
     ...missingReversals.map((row) => ({
       entry_id: String(row.entry_id),

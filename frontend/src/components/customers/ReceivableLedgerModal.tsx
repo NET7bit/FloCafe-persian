@@ -5,7 +5,7 @@ import { X, TrendingUp, TrendingDown, BookUser, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
 import toast from 'react-hot-toast';
-import { useTranslations } from 'use-intl';
+import { useLocale, useTranslations } from 'use-intl';
 import { useFormatCurrency } from '@/hooks/useFormatCurrency';
 import { useFormatDate } from '@/hooks/useFormatDate';
 import { PAYMENT_METHODS } from '@/lib/payment-methods';
@@ -21,6 +21,7 @@ interface Entry {
   direction: 'debit' | 'credit';
   amount: number;
   payment_method: string | null;
+  reference: string | null;
   description: string | null;
   entry_date: string;
 }
@@ -41,6 +42,7 @@ export default function ReceivableLedgerModal({ customer, onClose }: Props) {
   const t = useTranslations('customers');
   const tCommon = useTranslations('common');
   const tPos = useTranslations('pos');
+  const locale = useLocale();
   const fmt = useFormatCurrency();
   const { formatDate } = useFormatDate();
 
@@ -106,7 +108,10 @@ export default function ReceivableLedgerModal({ customer, onClose }: Props) {
 
   const typeLabel = (entry: Entry) => {
     const key = TYPE_LABEL_KEYS[entry.entry_type];
-    return `${t(key)}${entry.entry_type === 'settlement' && entry.payment_method ? ` · ${entry.payment_method}` : ''}`;
+    const method = entry.payment_method === 'payroll_deduction'
+      ? (locale.startsWith('fa') ? 'کسر از حقوق' : 'Payroll deduction')
+      : entry.payment_method;
+    return `${t(key)}${entry.entry_type === 'settlement' && method ? ` · ${method}` : ''}`;
   };
 
   return (
@@ -228,9 +233,9 @@ export default function ReceivableLedgerModal({ customer, onClose }: Props) {
                       </span>
                     </td>
                     <td className="px-6 py-3 text-end">
-                      <Button variant="ghost" size="sm" onClick={() => deleteEntry(entry.id)} title={tCommon('delete')}>
+                      {entry.payment_method !== 'payroll_deduction' && !entry.reference?.startsWith('payroll-reversal:') && <Button variant="ghost" size="sm" onClick={() => deleteEntry(entry.id)} title={tCommon('delete')}>
                         <Trash2 size={13} className="text-muted-foreground" />
-                      </Button>
+                      </Button>}
                     </td>
                   </tr>
                 ))}

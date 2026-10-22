@@ -6992,6 +6992,173 @@ export const MIGRATIONS: { version: number; name: string; up: () => void }[] = [
       `).run();
     },
   },
+  {
+    version: 1013,
+    name: 'add_payroll_accounting',
+    up: () => {
+      const journalIndexes = (db.prepare(`
+        SELECT name, sql FROM sqlite_master
+        WHERE type = 'index' AND tbl_name = 'journal_entries' AND sql IS NOT NULL
+      `).all() as { name: string; sql: string }[])
+        .filter((index) => index.name.startsWith('idx_journal_entries_'));
+      if (!tableDdlIncludes(db, 'journal_entries', "'payroll'")) {
+        db.exec(`
+          PRAGMA foreign_keys = OFF;
+          CREATE TABLE journal_entries_v105_migration (
+            id TEXT PRIMARY KEY,
+            entry_date TEXT NOT NULL,
+            description TEXT,
+            source_module TEXT NOT NULL CHECK (source_module IN ('sales', 'refunds', 'receivables', 'purchases', 'supplier_payments', 'purchase_returns', 'expenses', 'manual', 'opening_balance', 'cogs', 'payroll')),
+            source_id TEXT,
+            seq INTEGER NOT NULL DEFAULT 1,
+            reference TEXT,
+            status TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('posted', 'reversed')),
+            reverses_journal_id TEXT REFERENCES journal_entries(id),
+            created_by TEXT REFERENCES users(id),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (source_module, source_id, seq)
+          );
+          INSERT INTO journal_entries_v105_migration (
+            id, entry_date, description, source_module, source_id, seq, reference, status, reverses_journal_id, created_by, created_at
+          )
+          SELECT id, entry_date, description, source_module, source_id, seq, reference, status, reverses_journal_id, created_by, created_at
+          FROM journal_entries;
+          DROP TABLE journal_entries;
+          ALTER TABLE journal_entries_v105_migration RENAME TO journal_entries;
+          PRAGMA foreign_keys = ON;
+        `);
+        for (const index of journalIndexes) db.exec(index.sql);
+      }
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS payroll_employees (
+          id TEXT PRIMARY KEY,
+          employee_code TEXT UNIQUE,
+          name TEXT NOT NULL,
+          is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+          notes TEXT,
+          created_by TEXT REFERENCES users(id),
+          updated_by TEXT REFERENCES users(id),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_payroll_employees_active_name ON payroll_employees(is_active, name COLLATE NOCASE);
+
+        CREATE TABLE IF NOT EXISTS payroll_runs (
+          id TEXT PRIMARY KEY,
+          period_start TEXT NOT NULL CHECK (period_start GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+          period_end TEXT NOT NULL CHECK (period_end GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+          status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'posted', 'reversed')),
+          posted_at TEXT,
+          posted_by TEXT REFERENCES users(id),
+          reversed_at TEXT,
+          reversed_by TEXT REFERENCES users(id),
+          created_by TEXT REFERENCES users(id),
+          updated_by TEXT REFERENCES users(id),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CHECK (period_start <= period_end)
+        );
+        CREATE INDEX IF NOT EXISTS idx_payroll_runs_period ON payroll_runs(period_start, period_end);
+        CREATE INDEX IF NOT EXISTS idx_payroll_runs_status ON payroll_runs(status);
+
+        CREATE TABLE IF NOT EXISTS payroll_run_items (
+          id TEXT PRIMARY KEY,
+          payroll_run_id TEXT NOT NULL REFERENCES payroll_runs(id) ON DELETE RESTRICT,
+          employee_id TEXT NOT NULL REFERENCES payroll_employees(id) ON DELETE RESTRICT,
+          employee_name TEXT NOT NULL,
+          gross_amount REAL NOT NULL CHECK (gross_amount >= 0),
+          deductions_amount REAL NOT NULL CHECK (deductions_amount >= 0),
+          net_amount REAL NOT NULL CHECK (net_amount >= 0),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (payroll_run_id, employee_id),
+          CHECK (gross_amount = deductions_amount + net_amount)
+        );
+        CREATE INDEX IF NOT EXISTS idx_payroll_run_items_run ON payroll_run_items(payroll_run_id);
+        CREATE INDEX IF NOT EXISTS idx_payroll_run_items_employee ON payroll_run_items(employee_id);
+
+        CREATE TABLE IF NOT EXISTS payroll_components (
+          id TEXT PRIMARY KEY,
+          payroll_run_item_id TEXT NOT NULL REFERENCES payroll_run_items(id) ON DELETE CASCADE,
+          component_type TEXT NOT NULL CHECK (component_type IN ('earning', 'deduction')),
+          label TEXT NOT NULL,
+          amount REAL NOT NULL CHECK (amount > 0),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_payroll_components_item ON payroll_components(payroll_run_item_id);
+
+        CREATE TABLE IF NOT EXISTS payroll_payments (
+          id TEXT PRIMARY KEY,
+          payroll_run_id TEXT NOT NULL REFERENCES payroll_runs(id) ON DELETE RESTRICT,
+          payroll_run_item_id TEXT NOT NULL REFERENCES payroll_run_items(id) ON DELETE RESTRICT,
+          amount REAL NOT NULL CHECK (amount > 0),
+          payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'card', 'bank_transfer', 'cheque')),
+          paid_at TEXT NOT NULL,
+          reference TEXT,
+          notes TEXT,
+          actor_user_id TEXT REFERENCES users(id),
+          deleted_at TEXT,
+          deleted_by TEXT REFERENCES users(id),
+          deletion_reason TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_payroll_payments_run ON payroll_payments(payroll_run_id, paid_at);
+        CREATE INDEX IF NOT EXISTS idx_payroll_payments_item ON payroll_payments(payroll_run_item_id);
+
+        CREATE TABLE IF NOT EXISTS payroll_withholding_payments (
+          id TEXT PRIMARY KEY,
+          payroll_run_id TEXT NOT NULL REFERENCES payroll_runs(id) ON DELETE RESTRICT,
+          amount REAL NOT NULL CHECK (amount > 0),
+          payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'card', 'bank_transfer', 'cheque')),
+          paid_at TEXT NOT NULL,
+          reference TEXT,
+          notes TEXT,
+          actor_user_id TEXT REFERENCES users(id),
+          deleted_at TEXT,
+          deleted_by TEXT REFERENCES users(id),
+          deletion_reason TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_payroll_withholding_payments_run ON payroll_withholding_payments(payroll_run_id, paid_at);
+      `);
+
+      const accounts: Array<[string, string, string, string]> = [
+        ['5010', 'Salaries and Wages', 'expense', 'debit'],
+        ['2010', 'Payroll Payable', 'liability', 'credit'],
+        ['2020', 'Payroll Withholdings Payable', 'liability', 'credit'],
+      ];
+      const insertAccount = db.prepare(`
+        INSERT OR IGNORE INTO accounting_accounts (id, code, name, type, normal_side, is_system, is_active)
+        VALUES (?, ?, ?, ?, ?, 1, 1)
+      `);
+      for (const [code, name, type, side] of accounts) insertAccount.run(`acct_${code}`, code, name, type, side);
+    },
+  },
+  {
+    version: 1014,
+    name: 'link_payroll_employees_to_customers_and_track_purchase_deductions',
+    up: () => {
+      if (!getColumns(db, 'payroll_employees').includes('customer_id')) {
+        db.exec('ALTER TABLE payroll_employees ADD COLUMN customer_id TEXT REFERENCES customers(id) ON DELETE RESTRICT');
+      }
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_employees_customer ON payroll_employees(customer_id) WHERE customer_id IS NOT NULL');
+      const runItemColumns = getColumns(db, 'payroll_run_items');
+      if (!runItemColumns.includes('customer_id')) {
+        db.exec('ALTER TABLE payroll_run_items ADD COLUMN customer_id TEXT REFERENCES customers(id) ON DELETE RESTRICT');
+      }
+      if (!runItemColumns.includes('purchase_deduction_amount')) {
+        db.exec('ALTER TABLE payroll_run_items ADD COLUMN purchase_deduction_amount REAL NOT NULL DEFAULT 0 CHECK (purchase_deduction_amount >= 0)');
+      }
+      const employees = db.prepare('SELECT id, name FROM payroll_employees WHERE customer_id IS NULL').all() as Array<{ id: string; name: string }>;
+      const createCustomer = db.prepare('INSERT INTO customers (id, name) VALUES (?, ?)');
+      const linkEmployee = db.prepare('UPDATE payroll_employees SET customer_id = ? WHERE id = ? AND customer_id IS NULL');
+      for (const employee of employees) {
+        const customerId = `cust_${crypto.randomUUID()}`;
+        createCustomer.run(customerId, employee.name);
+        linkEmployee.run(customerId, employee.id);
+      }
+    },
+  },
 ];
 
 function syncBackupBeforeMigration(fromVersion: number, toVersion: number): void {

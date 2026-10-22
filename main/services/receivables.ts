@@ -113,6 +113,15 @@ export function getCustomerBalance(db: ReturnType<typeof getDatabase>, customerI
   return roundMoney(row.balance);
 }
 
+export function getCustomerBalanceAtDate(db: ReturnType<typeof getDatabase>, customerId: string, entryDate: string): number {
+  getCustomerRow(db, customerId);
+  const row = db.prepare(`
+    SELECT COALESCE(SUM(CASE WHEN direction = 'debit' THEN amount ELSE -amount END), 0) AS balance
+    FROM receivable_entries WHERE customer_id = ? AND entry_date <= ?
+  `).get(customerId, entryDate) as { balance: number };
+  return roundMoney(row.balance);
+}
+
 /** Balances for every customer with at least one ledger entry. */
 export function listCustomerBalances(
   db: ReturnType<typeof getDatabase>,
@@ -285,6 +294,9 @@ export function createReceivableEntry(
 
   const description = assertDescription(input.description, entryType !== 'settlement');
   const reference = trimToNull(input.reference);
+  if (entryType === 'adjustment' && reference?.startsWith('payroll-reversal:')) {
+    throw new ReceivableError(400, 'Payroll reversal adjustments must be created by the payroll service');
+  }
   if (reference && reference.length > 128) {
     throw new ReceivableError(400, 'reference is too long (max 128 characters)');
   }
@@ -310,6 +322,55 @@ export function createReceivableEntry(
   return getReceivableEntry(db, id);
 }
 
+export function createPayrollDeductionSettlement(
+  db: ReturnType<typeof getDatabase>,
+  input: { id: string; customerId: string; amount: number; entryDate: string; payrollRunId: string; actorUserId: string },
+): ReceivableEntryRecord {
+  if (!input.actorUserId) throw new ReceivableError(400, 'actor_user_id is required');
+  const customer = getCustomerRow(db, input.customerId);
+  const amount = assertAmount(input.amount);
+  const entryDate = assertEntryDate(input.entryDate);
+  assertNotInClosedPeriod(db, entryDate);
+  const existing = db.prepare('SELECT id FROM receivable_entries WHERE id = ?').get(input.id) as { id: string } | undefined;
+  if (!existing) {
+    db.prepare(`
+      INSERT INTO receivable_entries (
+        id, customer_id, entry_type, direction, amount, payment_method,
+        reference, description, entry_date, created_by, notes, created_at
+      ) VALUES (?, ?, 'settlement', 'credit', ?, 'payroll_deduction', ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id, customer.id, amount, input.payrollRunId,
+      'Employee purchase balance deducted from payroll', entryDate,
+      input.actorUserId, 'Payroll deduction', now(),
+    );
+  }
+  return getReceivableEntry(db, input.id);
+}
+
+export function createPayrollDeductionReversal(
+  db: ReturnType<typeof getDatabase>,
+  input: { id: string; customerId: string; amount: number; entryDate: string; payrollRunId: string; actorUserId: string },
+): ReceivableEntryRecord {
+  if (!input.actorUserId) throw new ReceivableError(400, 'actor_user_id is required');
+  const customer = getCustomerRow(db, input.customerId);
+  const amount = assertAmount(input.amount);
+  const entryDate = assertEntryDate(input.entryDate);
+  assertNotInClosedPeriod(db, entryDate);
+  if (!db.prepare('SELECT id FROM receivable_entries WHERE id = ?').get(input.id)) {
+    db.prepare(`
+      INSERT INTO receivable_entries (
+        id, customer_id, entry_type, direction, amount, payment_method,
+        reference, description, entry_date, created_by, notes, created_at
+      ) VALUES (?, ?, 'adjustment', 'debit', ?, NULL, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id, customer.id, amount, `payroll-reversal:${input.payrollRunId}`,
+      'Restore employee purchase balance after payroll reversal', entryDate,
+      input.actorUserId, 'Payroll deduction reversal', now(),
+    );
+  }
+  return getReceivableEntry(db, input.id);
+}
+
 /** Deletes a ledger row. The derived balance updates with no recompute step. */
 export function deleteReceivableEntry(
   db: ReturnType<typeof getDatabase>,
@@ -318,6 +379,9 @@ export function deleteReceivableEntry(
 ): void {
   withTxn(() => {
     const entry = getReceivableEntry(db, id);
+    if (entry.payment_method === 'payroll_deduction' || entry.reference?.startsWith('payroll-reversal:')) {
+      throw new ReceivableError(409, 'Payroll-linked receivable settlements can only be reversed with their payroll run');
+    }
     assertNotInClosedPeriod(db, entry.entry_date);
     db.prepare('DELETE FROM receivable_entries WHERE id = ?').run(id);
   });

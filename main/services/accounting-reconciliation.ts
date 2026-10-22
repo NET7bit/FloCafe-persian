@@ -30,6 +30,7 @@ const TOLERANCE = 1e-6;
  * accounted set (`customer_account` → `1100`) and must not use this one.
  */
 const ACCOUNTED_TENDERS = new Set(['cash', 'card', 'bank_transfer', 'cheque']);
+const RECEIVABLE_SETTLEMENT_TENDERS = new Set([...ACCOUNTED_TENDERS, 'payroll_deduction']);
 
 export type ReconciliationStatus = 'MATCH' | 'MISMATCH' | 'NOT_RECONCILABLE';
 
@@ -151,12 +152,19 @@ function purchaseReturnDomain(db: Database, from: string, to: string): { source:
 
 function receivableDomain(db: Database, from: string, to: string): { source: number; count: number } {
   const rows = db.prepare(`
-    SELECT amount, entry_date, payment_method FROM receivable_entries WHERE entry_type = 'settlement'
-  `).all() as Array<{ amount: number; entry_date: string; payment_method: string | null }>;
+    SELECT amount, entry_date, payment_method, entry_type, direction, reference FROM receivable_entries
+    WHERE entry_type = 'settlement' OR (entry_type = 'adjustment' AND direction = 'debit' AND reference LIKE 'payroll-reversal:%')
+  `).all() as Array<{ amount: number; entry_date: string; payment_method: string | null; entry_type: string; direction: string; reference: string | null }>;
   let source = 0;
   let count = 0;
   for (const row of rows) {
-    if (!row.payment_method || !ACCOUNTED_TENDERS.has(row.payment_method)) continue;
+    if (row.entry_type === 'adjustment' && row.reference?.startsWith('payroll-reversal:')) {
+      if (!inRange(String(row.entry_date).slice(0, 10), from, to)) continue;
+      source -= Number(row.amount);
+      count += 1;
+      continue;
+    }
+    if (!row.payment_method || !RECEIVABLE_SETTLEMENT_TENDERS.has(row.payment_method)) continue;
     if (!inRange(String(row.entry_date).slice(0, 10), from, to)) continue;
     if (Number(row.amount) <= 0) continue;
     source += Number(row.amount);
@@ -376,6 +384,27 @@ export function getReconciliation(input: ReportRangeInput = {}): ReconciliationR
     difference: round(cogs.source - cogsJournal),
     status: statusFor(cogs.source - cogsJournal),
     details: { source_events: cogs.count, missing_journals: cogs.missing, control_account: COGS_ACCOUNT_CODE },
+  });
+
+  const payrollSource = db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS gross, COALESCE(SUM(event_count), 0) AS count FROM (
+      SELECT r.period_end AS event_date, SUM(i.gross_amount) AS amount, COUNT(DISTINCT r.id) AS event_count
+      FROM payroll_runs r JOIN payroll_run_items i ON i.payroll_run_id = r.id
+      WHERE r.status IN ('posted', 'reversed') GROUP BY r.id
+      UNION ALL
+      SELECT r.reversed_at AS event_date, -SUM(i.gross_amount) AS amount, 0 AS event_count
+      FROM payroll_runs r JOIN payroll_run_items i ON i.payroll_run_id = r.id
+      WHERE r.status = 'reversed' AND r.reversed_at IS NOT NULL GROUP BY r.id
+    ) WHERE event_date >= ? AND event_date <= ?
+  `).get(from, to) as { gross: number; count: number };
+  const payrollJournal = moduleAccountNet(db, 'payroll', '5010', from, to);
+  results.push({
+    domain: 'payroll',
+    source_total: round(Number(payrollSource.gross)),
+    journal_total: round(payrollJournal),
+    difference: round(Number(payrollSource.gross) - payrollJournal),
+    status: statusFor(Number(payrollSource.gross) - payrollJournal),
+    details: { source_events: Number(payrollSource.count), control_account: '5010' },
   });
 
   const inventory = inventoryDomain(db, to);
