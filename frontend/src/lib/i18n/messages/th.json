@@ -391,6 +391,8 @@
     "recipeDepletion": "การใช้วัสดุตามสูตร",
     "recipeRestore": "การคืนวัสดุตามสูตร",
     "movementType": "ประเภท",
+    "costPerUnit": "ต้นทุนต่อหน่วย",
+    "totalCost": "ต้นทุนรวม",
     "quantity": "จำนวน",
     "stockAfter": "คงเหลือหลังรายการ",
     "reason": "เหตุผล",

@@ -46,7 +46,36 @@ async function main() {
 
   createSupplier(db, { id: 'supp-a', name: 'Supplier A', code: 'SA' });
   createSupply(db, { id: 'sup-a', name: 'Sugar', baseUnit: 'kg', stockQuantity: 0, actorUserId: actor });
-  assertEqual(getSupply(db, 'sup-a').cost_price, 0, 'fresh supply starts at cost 0');
+  assertEqual(getSupply(db, 'sup-a').cost_price, 0, 'fresh supply uses zero as the unknown-cost sentinel');
+  const unknownReceive = applySupplyStockChange(db, {
+    supplyId: 'sup-a', quantityDelta: 1, movementType: 'receive', actorUserId: actor,
+  });
+  const unknownReceiveMovement = db.prepare('SELECT unit_cost, total_cost FROM supply_movements WHERE id = ?')
+    .get(unknownReceive.movementId) as any;
+  assertEqual(unknownReceiveMovement.unit_cost, null, 'unpriced stock with unknown WAC freezes a NULL unit cost');
+  assertEqual(unknownReceiveMovement.total_cost, null, 'unpriced stock with unknown WAC freezes a NULL total cost');
+
+  const zeroPricedReceive = applySupplyStockChange(db, {
+    supplyId: 'sup-a', quantityDelta: 1, movementType: 'receive', unitCost: 0, actorUserId: actor,
+  });
+  const zeroPricedMovement = db.prepare('SELECT unit_cost, total_cost FROM supply_movements WHERE id = ?')
+    .get(zeroPricedReceive.movementId) as any;
+  assertEqual(zeroPricedMovement.unit_cost, null, 'an explicit zero unit cost is treated as unknown');
+  assertEqual(zeroPricedMovement.total_cost, null, 'an explicit zero total cost is treated as unknown');
+
+  const unknownStockPricedReceipt = applySupplyStockChange(db, {
+    supplyId: 'sup-a', quantityDelta: 1, movementType: 'receive', unitCost: 1000, actorUserId: actor,
+  });
+  assertEqual(getSupply(db, 'sup-a').cost_price, 0, 'a priced receipt does not value pre-existing stock of unknown cost');
+  const knownReceiptMovement = db.prepare('SELECT unit_cost, total_cost FROM supply_movements WHERE id = ?')
+    .get(unknownStockPricedReceipt.movementId) as any;
+  assertEqual(knownReceiptMovement.unit_cost, 1000, 'a priced purchase movement keeps its known invoice unit cost');
+  assertEqual(knownReceiptMovement.total_cost, 1000, 'a priced purchase movement keeps its known invoice total');
+
+  applySupplyStockChange(db, {
+    supplyId: 'sup-a', quantityDelta: -3, movementType: 'waste', actorUserId: actor,
+  });
+  assertEqual(getSupply(db, 'sup-a').stock_quantity, 0, 'unknown on-hand stock can be depleted to zero');
 
   // ── Priced inflow sets the average ──
   applySupplyStockChange(db, {
@@ -134,6 +163,23 @@ async function main() {
     expectedInvoice,
     'posting an invoice blends its unit price into the average',
   );
+
+  const zeroCostSupply = createSupply(db, {
+    id: 'sup-zero-invoice', name: 'Unknown invoice cost', baseUnit: 'each', stockQuantity: 0, actorUserId: actor,
+  });
+  const zeroCostInvoice = createPurchaseInvoice(db, {
+    supplierId: 'supp-a',
+    invoiceDate: '2026-02-02',
+    items: [{ supplyId: zeroCostSupply.id, quantity: 2, unit: 'each', unitPrice: 0 }],
+    actorUserId: actor,
+  });
+  postPurchaseInvoice(db, zeroCostInvoice.id, actor);
+  const zeroCostInvoiceMovement = db.prepare(
+    "SELECT unit_cost, total_cost FROM supply_movements WHERE reference_type = 'purchase_invoice' AND reference_id = ?",
+  ).get(zeroCostInvoice.id) as any;
+  assertEqual(zeroCostInvoiceMovement.unit_cost, null, 'zero-priced invoice movement stays unknown');
+  assertEqual(zeroCostInvoiceMovement.total_cost, null, 'zero-priced invoice total stays unknown');
+  assertEqual(getSupply(db, zeroCostSupply.id).cost_price, 0, 'zero-priced invoice does not create a zero WAC');
 
   // Movement rows still record stock-only data.
   const lastMovement = db.prepare(

@@ -500,6 +500,8 @@
     "recipeDepletion": "Pengurangan resep",
     "recipeRestore": "Pemulihan resep",
     "movementType": "Jenis",
+    "costPerUnit": "Biaya per unit",
+    "totalCost": "Total biaya",
     "quantity": "Jumlah",
     "stockAfter": "Stok setelahnya",
     "reason": "Alasan",

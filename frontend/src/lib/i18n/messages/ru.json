@@ -391,6 +391,8 @@
     "recipeDepletion": "Списание по рецепту",
     "recipeRestore": "Восстановление рецепта",
     "movementType": "Тип",
+    "costPerUnit": "Стоимость за единицу",
+    "totalCost": "Общая стоимость",
     "quantity": "Количество",
     "stockAfter": "Остаток после операции",
     "reason": "Причина",

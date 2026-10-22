@@ -66,7 +66,7 @@ function itemConsumptionCost(db: Database, orderItemId: string | number): number
     SELECT
       COALESCE(SUM(total_cost), 0) AS net_cost,
       COUNT(*) AS movement_count,
-      SUM(CASE WHEN total_cost IS NULL THEN 1 ELSE 0 END) AS unknown_count
+      SUM(CASE WHEN total_cost IS NULL OR unit_cost IS NULL OR unit_cost = 0 THEN 1 ELSE 0 END) AS unknown_count
     FROM supply_movements
     WHERE reference_type = 'order_item'
       AND movement_type IN ('recipe_depletion', 'recipe_restore')
@@ -157,8 +157,7 @@ export function createItemCogsJournal(
     const bill = coveringBill(db, item.order_id, item.id);
     if (!bill) return null;
     const amount = itemConsumptionCost(db, item.id);
-    // Unknown frozen cost (NULL total_cost): never post a COGS journal from an
-    // incomplete sum. Recognition stays pending for reconciliation.
+    // Unknown frozen costs never become a COGS journal from an incomplete sum.
     if (amount === null || amount <= 0) return null;
     const entryDate = entryDateOverride || fiscalDateForInstant(bill.created_at);
     const seq = nextCogsSeq(db, item.id);
@@ -304,12 +303,21 @@ export function listUnresolvedCogsEvents(): UnresolvedCogsEvent[] {
       WHERE c.source_module = 'cogs' AND c.source_id = CAST(oi.id AS TEXT)
         AND c.status = 'posted' AND c.reverses_journal_id IS NULL
     )
-    AND COALESCE((
-      SELECT -SUM(m.total_cost) FROM supply_movements m
-      WHERE m.reference_type = 'order_item'
-        AND m.movement_type IN ('recipe_depletion', 'recipe_restore')
-        AND (m.reference_id = CAST(oi.id AS TEXT) OR m.reference_id GLOB CAST(oi.id AS TEXT) || ':*')
-    ), 0) > 0.000000001
+    AND (
+      EXISTS (
+        SELECT 1 FROM supply_movements m
+        WHERE m.reference_type = 'order_item'
+          AND m.movement_type IN ('recipe_depletion', 'recipe_restore')
+          AND (m.reference_id = CAST(oi.id AS TEXT) OR m.reference_id GLOB CAST(oi.id AS TEXT) || ':*')
+          AND (m.total_cost IS NULL OR m.unit_cost IS NULL OR m.unit_cost = 0)
+      )
+      OR COALESCE((
+        SELECT -SUM(m.total_cost) FROM supply_movements m
+        WHERE m.reference_type = 'order_item'
+          AND m.movement_type IN ('recipe_depletion', 'recipe_restore')
+          AND (m.reference_id = CAST(oi.id AS TEXT) OR m.reference_id GLOB CAST(oi.id AS TEXT) || ':*')
+      ), 0) > 0.000000001
+    )
     ORDER BY oi.id
   `).all() as Array<{ order_item_id: number; order_id: string; status: string | null }>;
 

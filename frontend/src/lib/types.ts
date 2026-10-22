@@ -91,6 +91,7 @@ export interface Product {
   tax_category_id?: string | null;
   tax_behavior?: 'country_default' | 'inclusive' | 'exclusive' | 'exempt';
   track_inventory: boolean;
+  has_active_recipe?: boolean;
   stock_quantity: number;
   low_stock_threshold: number | null;
   is_active: boolean;

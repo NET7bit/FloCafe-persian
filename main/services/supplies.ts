@@ -41,6 +41,8 @@ export interface SupplyMovement {
   movement_type: SupplyMovementType;
   unit: SupplyUnit;
   stock_after: number;
+  unit_cost: number | null;
+  total_cost: number | null;
   reason: string | null;
   actor_user_id: string;
   actor_name: string | null;
@@ -254,29 +256,35 @@ export function applySupplyStockChange(
   const stockAfter = roundQuantity(stockBefore + deltaInBase);
   const timestamp = options.createdAt || now();
 
-  // Weighted-average cost: positive inflows priced with unitCost blend into the
-  // on-hand value; outflows and unpriced inflows keep the current average.
+  // Zero is the persisted sentinel for an unknown weighted-average cost.
   let costPrice = Number(supply.cost_price ?? 0);
   if (!Number.isFinite(costPrice) || costPrice < 0) costPrice = 0;
   const pricedInflow = options.unitCost !== undefined && options.unitCost !== null
     && Number.isFinite(Number(options.unitCost)) && Number(options.unitCost) > 0;
-  let unitCostInBase = costPrice;
+  const explicitUnknownCost = options.unitCost !== undefined && options.unitCost !== null
+    && Number(options.unitCost) === 0;
+  let unitCostInBase: number | null = costPrice > 0 ? costPrice : null;
   if (pricedInflow) {
     unitCostInBase = Number(options.unitCost) / convertQuantity(1, unit, supply.base_unit);
   }
-  if (pricedInflow && deltaInBase > 0 && stockBefore >= 0 && stockAfter > 0) {
-    const incomingValue = roundQuantity(unitCostInBase * deltaInBase);
-    const onHandValue = roundQuantity(costPrice * Math.max(stockBefore, 0));
-    costPrice = roundQuantity((onHandValue + incomingValue) / stockAfter);
+  if (pricedInflow && deltaInBase > 0 && stockAfter > 0) {
+    if (stockBefore === 0) {
+      costPrice = unitCostInBase!;
+    } else if (stockBefore > 0 && costPrice > 0) {
+      const incomingValue = roundQuantity(unitCostInBase! * deltaInBase);
+      const onHandValue = roundQuantity(costPrice * stockBefore);
+      costPrice = roundQuantity((onHandValue + incomingValue) / stockAfter);
+    }
   }
 
-  // Frozen cost snapshot: a priced inflow freezes its purchase price per base
-  // unit, otherwise the weighted average at this movement. `total_cost` is
-  // signed (unit_cost × quantity_delta), so an item's net consumption is the
-  // negated sum of the movements that reference it. Pre-migration movements
-  // stay NULL and take no part in COGS.
-  const frozenUnitCost = roundQuantity(unitCostInBase);
-  const frozenTotalCost = roundQuantity(frozenUnitCost * deltaInBase);
+  // A priced inflow freezes its purchase price; other movements freeze the
+  // known average. Unknown costs stay NULL for COGS reconciliation.
+  const frozenUnitCost = explicitUnknownCost || unitCostInBase === null
+    ? null
+    : roundQuantity(unitCostInBase);
+  const frozenTotalCost = frozenUnitCost === null
+    ? null
+    : roundQuantity(frozenUnitCost * deltaInBase);
 
   db.prepare('UPDATE supplies SET stock_quantity = ?, cost_price = ?, updated_at = ? WHERE id = ?')
     .run(stockAfter, costPrice, timestamp, options.supplyId);
@@ -352,7 +360,7 @@ function recordSupplyMovementInTxn(db: ReturnType<typeof getDatabase>, input: Re
   const row = db.prepare(`
     SELECT
       m.id, m.supply_id, s.name AS supply_name, m.quantity_delta, m.movement_type, m.unit,
-      m.stock_after, m.reason, m.actor_user_id, u.name AS actor_name,
+      m.stock_after, m.unit_cost, m.total_cost, m.reason, m.actor_user_id, u.name AS actor_name,
       m.reference_type, m.reference_id, m.created_at
     FROM supply_movements m
     LEFT JOIN supplies s ON s.id = m.supply_id
@@ -399,7 +407,7 @@ export function listSupplyMovements(
   const rows = db.prepare(`
     SELECT
       m.id, m.supply_id, s.name AS supply_name, m.quantity_delta, m.movement_type, m.unit,
-      m.stock_after, m.reason, m.actor_user_id, u.name AS actor_name,
+      m.stock_after, m.unit_cost, m.total_cost, m.reason, m.actor_user_id, u.name AS actor_name,
       m.reference_type, m.reference_id, m.created_at
     FROM supply_movements m
     LEFT JOIN supplies s ON s.id = m.supply_id

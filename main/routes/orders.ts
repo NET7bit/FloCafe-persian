@@ -629,7 +629,8 @@ router.post('/', orderWriteRateLimit, requirePermission('orders.create'), (req: 
 
         // Validate quantity and price
         validateProductQuantity(product, quantity);
-        const deduction = resolveInventoryDeduction(product, quantity);
+        const recipeSnapshot = buildRecipeSnapshot(db, product.id, quantity);
+        const deduction = recipeSnapshot ? null : resolveInventoryDeduction(product, quantity);
         if (unitPrice < 0 || !Number.isFinite(unitPrice)) {
           throw Object.assign(new Error(`Invalid price for ${product.name}: must be a non-negative number`), { statusCode: 400 });
         }
@@ -665,7 +666,6 @@ router.post('/', orderWriteRateLimit, requirePermission('orders.create'), (req: 
         subtotal += itemSubtotal;
 
         const itemCreatedAt = now();
-        const recipeSnapshot = buildRecipeSnapshot(db, product.id, quantity);
         const insertItemResult = insertItem.run(
           orderId, product.id, product.name, product.sku, unitPrice, quantity,
           deduction ? deduction.deductedQuantity : 0, deduction ? deduction.productId : null,
@@ -872,7 +872,8 @@ router.post('/:id/items', orderWriteRateLimit, requirePermission('orders.create'
 
         // Validate quantity and price
         validateProductQuantity(product, quantity);
-        const deduction = resolveInventoryDeduction(product, quantity);
+        const recipeSnapshot = buildRecipeSnapshot(db, product.id, quantity);
+        const deduction = recipeSnapshot ? null : resolveInventoryDeduction(product, quantity);
         if (unitPrice < 0 || !Number.isFinite(unitPrice)) {
           throw Object.assign(new Error(`Invalid price for ${product.name}: must be a non-negative number`), { statusCode: 400 });
         }
@@ -897,7 +898,6 @@ router.post('/:id/items', orderWriteRateLimit, requirePermission('orders.create'
         const itemTaxSnapshotJson = taxResult.tax_snapshot ? JSON.stringify(taxResult.tax_snapshot) : null;
 
         const itemCreatedAt = now();
-        const recipeSnapshot = buildRecipeSnapshot(db, product.id, quantity);
         const insertItemResult = insertItem.run(
           req.params.id, product.id, product.name, product.sku, unitPrice, quantity,
           deduction ? deduction.deductedQuantity : 0, deduction ? deduction.productId : null,

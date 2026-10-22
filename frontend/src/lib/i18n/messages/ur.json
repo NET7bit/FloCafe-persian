@@ -391,6 +391,8 @@
     "recipeDepletion": "ترکیب سے کمی",
     "recipeRestore": "ترکیب کی بحالی",
     "movementType": "قسم",
+    "costPerUnit": "فی اکائی لاگت",
+    "totalCost": "کل لاگت",
     "quantity": "مقدار",
     "stockAfter": "بحوال اسٹاک",
     "reason": "وجہ",

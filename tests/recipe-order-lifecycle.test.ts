@@ -244,7 +244,7 @@ async function main() {
     assertEqual(order5.status, 201, 'order with scaled yield recipe created');
     assertEqual(stockOf(db, beans.id), beansYield - 36, 'yield scales depletion (72 g per 4 -> 36 g for 2)');
 
-    console.log('\n--- 9. Product inventory independent of supplies ---');
+    console.log('\n--- 9. Active recipe takes precedence over product inventory ---');
     seedProduct(db, 'prod-track-both', 'cat-rec', 'Tracked', 100, { track_inventory: true, stock_quantity: 10 });
     saveRecipe(db, {
       productId: 'prod-track-both',
@@ -261,9 +261,12 @@ async function main() {
     assertEqual(stockOf(db, beans.id), beansBoth - 10, 'supplies depleted for tracked product with recipe');
     assertEqual(
       db.prepare('SELECT stock_quantity FROM products WHERE id = ?').get('prod-track-both').stock_quantity,
-      9,
-      'product stock also deducted (10 -> 9)',
+      10,
+      'product stock is not also deducted when an active recipe supplies the stock rule',
     );
+    const trackedRecipeItem = db.prepare('SELECT inventory_deducted_quantity, inventory_product_id FROM order_items WHERE order_id = ?').get(order6.data.order.id);
+    assertEqual(trackedRecipeItem.inventory_deducted_quantity, 0, 'recipe-backed item stores no product-stock deduction');
+    assertEqual(trackedRecipeItem.inventory_product_id, null, 'recipe-backed item stores no product inventory target');
 
     console.log('\n--- 10. Recipe edit does not alter historical restore ---');
     saveRecipe(db, {

@@ -391,6 +391,8 @@
     "recipeDepletion": "Zbritja nga receta",
     "recipeRestore": "Rikthimi nga receta",
     "movementType": "Lloji",
+    "costPerUnit": "Kosto për njësi",
+    "totalCost": "Kosto totale",
     "quantity": "Sasia",
     "stockAfter": "Stoku pas",
     "reason": "Arsyeja",

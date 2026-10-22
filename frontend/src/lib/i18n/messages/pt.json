@@ -500,6 +500,8 @@
     "recipeDepletion": "Baixa de receita",
     "recipeRestore": "Restauração de receita",
     "movementType": "Tipo",
+    "costPerUnit": "Custo por unidade",
+    "totalCost": "Custo total",
     "quantity": "Quantidade",
     "stockAfter": "Estoque após",
     "reason": "Motivo",

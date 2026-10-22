@@ -170,12 +170,21 @@ async function main() {
   const orderFree = await createOrder([{ product_id: 'prod-free', quantity: 5 }]);
   const itemFree = orderItemId(orderFree, 'prod-free');
   const freeMovement = db.prepare("SELECT * FROM supply_movements WHERE reference_type = 'order_item' AND reference_id = ?").get(String(itemFree)) as any;
-  assertEqual(Number(freeMovement.total_cost), 0, 'a zero-cost supply freezes a zero total');
+  assertEqual(freeMovement.unit_cost, null, 'a zero-cost supply freezes an unknown unit cost');
+  assertEqual(freeMovement.total_cost, null, 'a zero-cost supply freezes an unknown total');
   const freeBill = insertBill(orderFree, 50);
   recognizeSale(freeBill, 50);
   recordBillCogsAccounting(freeBill, owner.userId);
   assertEqual(cogsJournals(db, itemFree).length, 0, 'consumption without a valid frozen cost creates no COGS (never guessed from products.cost)');
   assertEqual(createItemCogsJournal(itemFree, owner.userId), null, 'recognition of a cost-less item is a no-op');
+  const unresolvedFree = listUnresolvedCogsEvents().find((e: any) => e.event_id === String(itemFree));
+  assert(!!unresolvedFree && unresolvedFree.state === 'missing_journal', 'zero-sentinel cost remains visible for reconciliation');
+  assertEqual(unresolvedFree!.amount, null, 'zero-sentinel cost is reported as unknown, not a zero amount');
+  db.prepare("UPDATE supply_movements SET unit_cost = 0, total_cost = 0 WHERE reference_type = 'order_item' AND reference_id = ? AND movement_type = 'recipe_depletion'")
+    .run(String(itemFree));
+  assertEqual(createItemCogsJournal(itemFree, owner.userId), null, 'legacy zero-cost snapshots never post as actual zero COGS');
+  const unresolvedLegacyZero = listUnresolvedCogsEvents().find((e: any) => e.event_id === String(itemFree));
+  assert(!!unresolvedLegacyZero && unresolvedLegacyZero.state === 'missing_journal', 'legacy zero-cost snapshots remain reconcilable');
 
   // ── Negative stock with a valid average still recognizes ──
   const orderNegative = await createOrder([{ product_id: 'prod-latte', quantity: 100 }]); // 1800 g > 1000 g on hand
@@ -363,14 +372,54 @@ async function main() {
   recognizeSale(billNull, 250);
   assertEqual(createItemCogsJournal(itemNull, owner.userId), null, 'P1: an unknown frozen cost posts no COGS instead of zero');
   assertEqual(cogsJournals(db, itemNull).length, 0, 'P1: no journal row is written for an unknown cost');
+  const unresolvedNull = listUnresolvedCogsEvents().find((e: any) => e.event_id === String(itemNull));
+  assert(!!unresolvedNull && unresolvedNull.state === 'missing_journal', 'P1-b: all-NULL recipe movements remain unresolved');
+  assertEqual(unresolvedNull!.amount, null, 'P1-b: an all-NULL unresolved amount remains unknown');
 
-  // (d) no movements at all — nothing consumed, nothing to post
+  // (d) a NULL qualifying movement remains unresolved beside a numeric movement
+  const orderMixed = await createOrder([{ product_id: 'prod-latte', quantity: 1 }]);
+  const itemMixed = orderItemId(orderMixed, 'prod-latte');
+  const depletionMixed = db.prepare(
+    "SELECT supply_id, unit FROM supply_movements WHERE reference_type = 'order_item' AND reference_id = ? AND movement_type = 'recipe_depletion'",
+  ).get(String(itemMixed)) as any;
+  db.prepare(
+    "UPDATE supply_movements SET total_cost = NULL WHERE reference_type = 'order_item' AND reference_id = ? AND movement_type = 'recipe_depletion'",
+  ).run(String(itemMixed));
+  db.prepare(`
+    INSERT INTO supply_movements (supply_id, quantity_delta, movement_type, unit, stock_after, reason,
+      actor_user_id, reference_type, reference_id, created_at, unit_cost, total_cost)
+    VALUES (?, 1, 'recipe_restore', ?, 1, 'P1-b mixed-cost probe', ?, 'order_item', ?, ?, 1, 1)
+  `).run(depletionMixed.supply_id, depletionMixed.unit, owner.userId, String(itemMixed), now());
+  const billMixed = insertBill(orderMixed, 250);
+  recognizeSale(billMixed, 250);
+  const unresolvedMixed = listUnresolvedCogsEvents().find((e: any) => e.event_id === String(itemMixed));
+  assert(!!unresolvedMixed && unresolvedMixed.state === 'missing_journal', 'P1-b: NULL and numeric recipe movements remain unresolved');
+  assertEqual(unresolvedMixed!.amount, null, 'P1-b: a mixed-cost event still reports unknown amount');
+
+  // (e) no qualifying movements — empty sets stay resolved
   const orderNone = await createOrder([{ product_id: 'prod-latte', quantity: 1 }]);
   const itemNone = orderItemId(orderNone, 'prod-latte');
   db.prepare("DELETE FROM supply_movements WHERE reference_type = 'order_item' AND reference_id = ?").run(String(itemNone));
   const billNone = insertBill(orderNone, 250);
   recognizeSale(billNone, 250);
   assertEqual(createItemCogsJournal(itemNone, owner.userId), null, 'P1: an empty movement set posts nothing');
+  assert(!listUnresolvedCogsEvents().some((e: any) => e.event_id === String(itemNone)), 'P1-b: an empty movement set is not unresolved');
+
+  // (f) unrelated NULL movements do not enter unresolved discovery
+  const orderUnrelated = await createOrder([{ product_id: 'prod-latte', quantity: 1 }]);
+  const itemUnrelated = orderItemId(orderUnrelated, 'prod-latte');
+  const depletionUnrelated = db.prepare(
+    "SELECT supply_id, unit FROM supply_movements WHERE reference_type = 'order_item' AND reference_id = ? AND movement_type = 'recipe_depletion'",
+  ).get(String(itemUnrelated)) as any;
+  db.prepare("DELETE FROM supply_movements WHERE reference_type = 'order_item' AND reference_id = ?").run(String(itemUnrelated));
+  db.prepare(`
+    INSERT INTO supply_movements (supply_id, quantity_delta, movement_type, unit, stock_after, reason,
+      actor_user_id, reference_type, reference_id, created_at, unit_cost, total_cost)
+    VALUES (?, -1, 'waste', ?, 0, 'P1-b unrelated NULL probe', ?, 'order_item', ?, ?, 5, NULL)
+  `).run(depletionUnrelated.supply_id, depletionUnrelated.unit, owner.userId, String(itemUnrelated), now());
+  const billUnrelated = insertBill(orderUnrelated, 250);
+  recognizeSale(billUnrelated, 250);
+  assert(!listUnresolvedCogsEvents().some((e: any) => e.event_id === String(itemUnrelated)), 'P1-b: unrelated NULL movements do not become unresolved');
 
   // ── Ledger invariants ──
   const unbalanced = db.prepare(`

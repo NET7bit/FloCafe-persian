@@ -500,6 +500,8 @@
     "recipeDepletion": "Consumo ricetta",
     "recipeRestore": "Ripristino ricetta",
     "movementType": "Tipo",
+    "costPerUnit": "Costo per unità",
+    "totalCost": "Costo totale",
     "quantity": "Quantità",
     "stockAfter": "Scorte dopo",
     "reason": "Motivo",

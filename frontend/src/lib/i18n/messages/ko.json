@@ -500,6 +500,8 @@
     "recipeDepletion": "레시피 차감",
     "recipeRestore": "레시피 복원",
     "movementType": "유형",
+    "costPerUnit": "단위당 원가",
+    "totalCost": "총 원가",
     "quantity": "수량",
     "stockAfter": "변동 후 재고",
     "reason": "사유",

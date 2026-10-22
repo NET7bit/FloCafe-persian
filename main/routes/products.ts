@@ -318,6 +318,7 @@ function serializeProduct(product: any): any {
     ...product,
     is_active: toBoolean(product.is_active),
     track_inventory: toBoolean(product.track_inventory),
+    has_active_recipe: product.has_active_recipe === undefined ? undefined : toBoolean(product.has_active_recipe),
     allow_fractional_quantity: toBoolean(product.allow_fractional_quantity),
     has_image: toBoolean(product.has_image),
     category: serializeCategory(product.category),
@@ -544,6 +545,7 @@ router.get('/', requirePermission('catalog.view'), (req: Request, res: Response)
       p.inventory_product_id, p.inventory_deduction_quantity,
       p.is_active, p.sort_order, p.track_inventory, p.stock_quantity, p.low_stock_threshold,
       p.tax_type, p.tax_rate, p.tax_category_id, p.tax_behavior, p.cb_percent, p.tags, p.deleted_at, p.created_at, p.updated_at,
+      EXISTS (SELECT 1 FROM recipes r WHERE r.product_id = p.id AND r.is_active = 1) AS has_active_recipe,
       CASE WHEN p.image_url IS NULL OR p.image_url = '' THEN 0 ELSE 1 END AS has_image
       FROM products p 
       LEFT JOIN categories c ON p.category_id = c.id
@@ -572,7 +574,8 @@ router.get('/', requirePermission('catalog.view'), (req: Request, res: Response)
       params.push(barcode);
     }
     if (req.query.low_stock === 'true') {
-      query += ' AND p.track_inventory = 1 AND p.stock_quantity <= p.low_stock_threshold';
+      query += ` AND p.track_inventory = 1 AND p.stock_quantity <= p.low_stock_threshold
+        AND NOT EXISTS (SELECT 1 FROM recipes r WHERE r.product_id = p.id AND r.is_active = 1)`;
     }
 
     query += ' ORDER BY p.sort_order, p.name';

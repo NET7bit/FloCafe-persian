@@ -500,6 +500,8 @@
     "recipeDepletion": "Recipe depletion",
     "recipeRestore": "Recipe restore",
     "movementType": "Type",
+    "costPerUnit": "Cost per unit",
+    "totalCost": "Total cost",
     "quantity": "Quantity",
     "stockAfter": "Stock after",
     "reason": "Reason",

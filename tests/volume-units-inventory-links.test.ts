@@ -28,6 +28,8 @@ const { getJWTSecret } = require('../main/routes/auth');
 const { registerRoutes } = require('../main/routes/index');
 const { resolveInventoryDeduction } = require('../main/services/inventory');
 const { validateProductQuantity } = require('../main/routes/orders-validation');
+const { createSupply } = require('../main/services/supplies');
+const { saveRecipe } = require('../main/services/recipes');
 
 function tableColumns(db: any, table: string): string[] {
   return db.prepare(`PRAGMA table_info(${table})`).all().map((column: any) => column.name);
@@ -228,6 +230,28 @@ async function main() {
       });
       const latteId = latte.data.product.id;
       db.prepare('UPDATE products SET stock_quantity = 999 WHERE id = ?').run(latteId);
+
+      const recipeTracked = await api(baseUrl, '/api/products', {
+        method: 'POST',
+        headers: owner.authHeader,
+        body: { category_id: 'cat-link', name: 'Recipe Tracked', price: 80, track_inventory: true, stock_quantity: 0, low_stock_threshold: 5 },
+      });
+      assertEqual(recipeTracked.status, 201, 'recipe-tracked product created');
+      const recipeSupply = createSupply(db, {
+        id: 'recipe-stock-supply', name: 'Recipe Stock Supply', baseUnit: 'each', stockQuantity: 10, actorUserId: owner.userId,
+      });
+      saveRecipe(db, {
+        productId: recipeTracked.data.product.id,
+        items: [{ supplyId: recipeSupply.id, quantity: 1, unit: 'each' }],
+      });
+      const productList = await api(baseUrl, '/api/products', { headers: owner.authHeader });
+      const listedRecipeProduct = productList.data.products.find((p: any) => p.id === recipeTracked.data.product.id);
+      assertEqual(listedRecipeProduct.has_active_recipe, true, 'product list marks active-recipe inventory authority');
+      const lowStockProducts = await api(baseUrl, '/api/products?low_stock=true', { headers: owner.authHeader });
+      assert(
+        !lowStockProducts.data.products.some((p: any) => p.id === recipeTracked.data.product.id),
+        'low-stock product filter excludes stock that active recipes do not consume',
+      );
 
       const selfRef = await api(baseUrl, `/api/products/${latteId}`, {
         method: 'PUT',

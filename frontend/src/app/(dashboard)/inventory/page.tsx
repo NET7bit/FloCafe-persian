@@ -21,6 +21,7 @@ interface Supply {
   name: string;
   base_unit: SupplyUnit;
   stock_quantity: number;
+  cost_price: number | null;
   low_stock_threshold: number | null;
   is_active: number;
   is_low_stock?: number;
@@ -34,6 +35,8 @@ interface SupplyMovement {
   movement_type: string;
   unit: SupplyUnit;
   stock_after: number;
+  unit_cost: number | null;
+  total_cost: number | null;
   reason: string | null;
   actor_name: string | null;
   created_at: string;
@@ -74,11 +77,12 @@ const movementTypeIcons: Record<string, typeof ArrowUpCircle> = {
 export default function InventoryPage() {
   const { currentTenant } = useAuthStore();
   const t = useTranslations('inventory');
+  const tProducts = useTranslations('products');
   const tNav = useTranslations('nav');
   const tCommon = useTranslations('common');
   const { formatDate } = useFormatDate();
   const fmtNum = useFormatNumber();
-  const canManage = tenantCan(currentTenant, 'inventory.manage');
+  const canManage = tenantCan(currentTenant, 'supplies.manage');
 
   const [tab, setTab] = useState('supplies');
   const [supplies, setSupplies] = useState<Supply[]>([]);
@@ -368,6 +372,13 @@ export default function InventoryPage() {
                   <tr key={s.id} className="hover:bg-muted">
                     <td className="p-4 font-medium text-foreground">
                       {s.name}
+                      <p className="text-xs font-normal text-muted-foreground">
+                        {tProducts('costLabel', {
+                          value: s.cost_price != null && Number(s.cost_price) > 0
+                            ? `${fmtNum(Number(s.cost_price))} / ${s.base_unit}`
+                            : tCommon('unknown'),
+                        })}
+                      </p>
                       {s.is_low_stock === 1 && (
                         <Badge variant="destructive" className="ms-2">{t('lowStock')}</Badge>
                       )}
@@ -456,6 +467,8 @@ export default function InventoryPage() {
                   <th className="text-start p-4 text-xs font-medium text-muted-foreground uppercase">{t('supply')}</th>
                   <th className="text-center p-4 text-xs font-medium text-muted-foreground uppercase">{t('movementType')}</th>
                   <th className="text-end p-4 text-xs font-medium text-muted-foreground uppercase">{t('quantity')}</th>
+                  <th className="text-end p-4 text-xs font-medium text-muted-foreground uppercase">{t('costPerUnit')}</th>
+                  <th className="text-end p-4 text-xs font-medium text-muted-foreground uppercase">{t('totalCost')}</th>
                   <th className="text-end p-4 text-xs font-medium text-muted-foreground uppercase">{t('stockAfter')}</th>
                   <th className="text-start p-4 text-xs font-medium text-muted-foreground uppercase">{t('reason')}</th>
                   <th className="text-start p-4 text-xs font-medium text-muted-foreground uppercase">{t('actor')}</th>
@@ -479,6 +492,16 @@ export default function InventoryPage() {
                       </td>
                       <td className={`p-4 text-end text-sm font-medium whitespace-nowrap ${Number(m.quantity_delta) < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                         {Number(m.quantity_delta) > 0 ? '+' : ''}{fmtNum(Number(m.quantity_delta))} {m.unit}
+                      </td>
+                      <td className="p-4 text-end text-sm text-muted-foreground whitespace-nowrap">
+                        {m.unit_cost == null || Number(m.unit_cost) <= 0
+                          ? tCommon('unknown')
+                          : `${fmtNum(Number(m.unit_cost))} / ${m.unit}`}
+                      </td>
+                      <td className="p-4 text-end text-sm text-muted-foreground whitespace-nowrap">
+                        {m.total_cost == null || m.unit_cost == null || Number(m.unit_cost) <= 0
+                          ? tCommon('unknown')
+                          : fmtNum(Number(m.total_cost))}
                       </td>
                       <td className="p-4 text-end text-sm text-muted-foreground whitespace-nowrap">{fmtNum(Number(m.stock_after))} {m.unit}</td>
                       <td className="p-4 text-sm text-muted-foreground">{m.reason || '—'}</td>

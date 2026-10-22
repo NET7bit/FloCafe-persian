@@ -270,8 +270,14 @@ tables (`supplies`, `supply_movements`) with a signed ledger, separate from prod
 4. **Void after preparation is physical waste.** Items voided while in progress, ready, or
    completed restore neither supplies nor product stock. Only a `pending` cancel restores.
 5. **Refunds never restore supplies**, matching product inventory behaviour.
-6. **Product stock tracking and recipe depletion are independent** and may both be active on the
-   same product.
+6. **An active recipe takes precedence over product stock tracking for new order items.** The order
+   depletes recipe supplies and does not also deduct linked or self-tracked product stock. When no
+   active recipe snapshot is available, product stock tracking follows its configured link or
+   self-tracking rule. Existing order items restore the deductions recorded on that item.
+7. **Zero supply cost means unknown.** A fresh or unpriced supply uses `cost_price = 0` as the
+   unknown-average sentinel. Movement cost snapshots remain `NULL` until a positive cost is known;
+   unknown costs never become zero-value COGS. A priced receipt cannot assign a complete average
+   while positive on-hand stock still has unknown cost.
 
 **Reason:** POS availability during a stockout matters more than ledger neatness. A store that
 cannot sell because flour has not been counted in yet is worse than a negative row to reconcile

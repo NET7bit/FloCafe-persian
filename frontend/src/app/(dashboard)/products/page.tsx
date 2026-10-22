@@ -70,6 +70,7 @@ export default function ProductsPage() {
   const t = useTranslations('products');
   const tCommon = useTranslations('common');
   const tPos = useTranslations('pos');
+  const tInventory = useTranslations('inventory');
 
   // Translate a raw tag string: known tags go through the `pos` namespace;
   // custom tags render a formatted name (reuses DietaryBadge's tagLabel).
@@ -695,7 +696,11 @@ export default function ProductsPage() {
                   </td>
                 )}
                 <td className="p-4 text-center">
-                  {product.track_inventory ? (
+                  {product.has_active_recipe ? (
+                    <span className="text-xs font-medium text-blue-700 bg-blue-100 rounded px-2 py-1">
+                      {tInventory('recipeDepletion')}
+                    </span>
+                  ) : product.track_inventory ? (
                     <span className={`text-sm font-medium ${product.stock_quantity <= (product.low_stock_threshold || 0) ? 'text-red-600' : 'text-foreground'}`}>
                       {product.stock_quantity <= 0 ? tPos('outOfStock') : product.stock_quantity}
                     </span>

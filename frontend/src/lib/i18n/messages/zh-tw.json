@@ -391,6 +391,8 @@
     "recipeDepletion": "配方扣減",
     "recipeRestore": "配方復原",
     "movementType": "型別",
+    "costPerUnit": "單位成本",
+    "totalCost": "總成本",
     "quantity": "數量",
     "stockAfter": "變動後庫存",
     "reason": "原因",

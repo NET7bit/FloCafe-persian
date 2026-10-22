@@ -391,6 +391,8 @@
     "recipeDepletion": "Voorraadverbruik via recept",
     "recipeRestore": "Voorraad via recept herstellen",
     "movementType": "Type mutatie",
+    "costPerUnit": "Kosten per eenheid",
+    "totalCost": "Totale kosten",
     "quantity": "Aantal",
     "stockAfter": "Voorraad na",
     "reason": "Reden",

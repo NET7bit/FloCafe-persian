@@ -391,6 +391,8 @@
     "recipeDepletion": "রেসিপি অবক্ষয়",
     "recipeRestore": "রেসিপি পুনরুদ্ধার",
     "movementType": "টাইপ",
+    "costPerUnit": "এককপ্রতি ব্যয়",
+    "totalCost": "মোট ব্যয়",
     "quantity": "পরিমাণ",
     "stockAfter": "স্টক পরে",
     "reason": "কারণ",

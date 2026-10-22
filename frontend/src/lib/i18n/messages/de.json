@@ -500,6 +500,8 @@
     "recipeDepletion": "Rezeptentnahme",
     "recipeRestore": "Rezeptwiederherstellung",
     "movementType": "Typ",
+    "costPerUnit": "Kosten pro Einheit",
+    "totalCost": "Gesamtkosten",
     "quantity": "Menge",
     "stockAfter": "Bestand nach",
     "reason": "Grund",

@@ -178,11 +178,24 @@ async function main() {
   const filtered = listSupplyMovements(db, { supplyId: coffee.id, movementType: 'receive' });
   assert(filtered.movements.every((m: any) => m.movement_type === 'receive'), 'type filter works');
   assertEqual(filtered.movements.length, 2, 'two receive movements recorded');
+  assertEqual(filtered.movements[0].unit_cost, null, 'movement history preserves an unknown unit cost');
+  assertEqual(filtered.movements[0].total_cost, null, 'movement history preserves an unknown total cost');
+
+  const pricedHistorySupply = createSupply(db, {
+    name: 'Priced beans', baseUnit: 'g', stockQuantity: 0, actorUserId: actor,
+  });
+  applySupplyStockChange(db, {
+    supplyId: pricedHistorySupply.id, quantityDelta: 2, movementType: 'receive',
+    unitCost: 7, actorUserId: actor,
+  });
+  const pricedHistory = listSupplyMovements(db, { supplyId: pricedHistorySupply.id }).movements[0];
+  assertEqual(pricedHistory.unit_cost, 7, 'movement history returns the frozen unit cost');
+  assertEqual(pricedHistory.total_cost, 14, 'movement history returns the frozen total cost');
 
   // ── Soft delete ──
   softDeleteSupply(db, cups.id);
   expectServiceError(() => getSupply(db, cups.id), 404, 'soft-deleted supply is not found');
-  assertEqual(listSupplies(db, { includeInactive: true }).length, 2, 'soft-deleted supply excluded from list');
+  assertEqual(listSupplies(db, { includeInactive: true }).length, 3, 'soft-deleted supply excluded from list');
   expectServiceError(() => softDeleteSupply(db, cups.id), 404, 'soft delete is not repeatable on missing supply');
 
   // update keeps base_unit immutable (not in update input)

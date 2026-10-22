@@ -391,6 +391,8 @@
     "recipeDepletion": "नुस्खा कमी",
     "recipeRestore": "नुस्खा पुनर्स्थापित करें",
     "movementType": "प्रकार",
+    "costPerUnit": "प्रति इकाई लागत",
+    "totalCost": "कुल लागत",
     "quantity": "मात्रा",
     "stockAfter": "बाद में स्टॉक करें",
     "reason": "कारण",

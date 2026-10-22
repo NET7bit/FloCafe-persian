@@ -500,6 +500,8 @@
     "recipeDepletion": "نضوب المكونات",
     "recipeRestore": "استعادة الوصفة",
     "movementType": "النوع",
+    "costPerUnit": "التكلفة لكل وحدة",
+    "totalCost": "التكلفة الإجمالية",
     "quantity": "الكمية",
     "stockAfter": "السهم بعد",
     "reason": "السبب",
