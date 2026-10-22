@@ -2374,7 +2374,8 @@
       "integrations": "연동",
       "system": "시스템",
       "support": "지원",
-      "accounting": "회계"
+      "accounting": "회계",
+      "payroll": "급여"
     },
     "capabilities": {
       "tablesView": "테이블 보기",
@@ -2437,7 +2438,9 @@
       "support": "지원팀 문의 및 진단 정보 보기",
       "accountingView": "원장 및 재무 보고서 보기",
       "accountingManage": "분개 입력 및 취소",
-      "accountingEntryManage": "비용, 미수금 및 회계 기간 관리"
+      "accountingEntryManage": "비용, 미수금 및 회계 기간 관리",
+      "payrollView": "급여 기록 보기",
+      "payrollManage": "급여 및 지급 관리"
     },
     "editorSubtitle": "역할 기본값을 구성하거나 특정 직원에 대한 예외를 만드세요. 변경 사항은 다음 작업부터 적용됩니다.",
     "roleDefaultsTab": "역할 기본값",

@@ -2265,7 +2265,8 @@
       "integrations": "एकीकरण",
       "system": "सिस्टम",
       "support": "समर्थन",
-      "accounting": "लेखांकन"
+      "accounting": "लेखांकन",
+      "payroll": "वेतन"
     },
     "capabilities": {
       "tablesView": "टेबल देखें",
@@ -2328,7 +2329,9 @@
       "inventoryManage": "आपूर्ति और व्यंजनों का प्रबंधन करें",
       "accountingView": "बहीखाता और वित्तीय रिपोर्ट देखें",
       "accountingManage": "जर्नल प्रविष्टियाँ दर्ज और उलटें",
-      "accountingEntryManage": "खर्च, प्राप्य और वित्तीय अवधि प्रबंधित करें"
+      "accountingEntryManage": "खर्च, प्राप्य और वित्तीय अवधि प्रबंधित करें",
+      "payrollView": "वेतन रिकॉर्ड देखें",
+      "payrollManage": "वेतन और भुगतान प्रबंधित करें"
     },
     "editorSubtitle": "भूमिका की डिफ़ॉल्ट सेटिंग्स कॉन्फ़िगर करें या एक कर्मचारी के लिए अपवाद बनाएँ। बदलाव उनके अगले कार्य पर लागू होंगे।",
     "roleDefaultsTab": "भूमिका डिफ़ॉल्ट",

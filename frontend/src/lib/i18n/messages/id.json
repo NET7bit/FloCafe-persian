@@ -2374,7 +2374,8 @@
       "integrations": "Integrasi",
       "system": "Sistem",
       "support": "Dukungan",
-      "accounting": "Akuntansi"
+      "accounting": "Akuntansi",
+      "payroll": "Penggajian"
     },
     "capabilities": {
       "tablesView": "Lihat meja",
@@ -2437,7 +2438,9 @@
       "support": "Menghubungi dukungan dan melihat diagnostik",
       "accountingView": "Lihat buku besar dan laporan keuangan",
       "accountingManage": "Posting dan balik entri jurnal",
-      "accountingEntryManage": "Kelola pengeluaran, piutang, dan periode fiskal"
+      "accountingEntryManage": "Kelola pengeluaran, piutang, dan periode fiskal",
+      "payrollView": "Lihat catatan penggajian",
+      "payrollManage": "Kelola penggajian dan pembayaran"
     },
     "editorSubtitle": "Konfigurasikan default peran atau buat pengecualian untuk satu staf. Perubahan berlaku pada tindakan berikutnya.",
     "roleDefaultsTab": "Default peran",

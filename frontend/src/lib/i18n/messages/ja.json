@@ -2374,7 +2374,8 @@
       "integrations": "連携",
       "system": "システム",
       "support": "サポート",
-      "accounting": "会計"
+      "accounting": "会計",
+      "payroll": "給与"
     },
     "capabilities": {
       "tablesView": "テーブルを表示",
@@ -2437,7 +2438,9 @@
       "support": "サポートに連絡し診断情報を表示",
       "accountingView": "元帳と財務レポートを表示",
       "accountingManage": "仕訳の計上と取消",
-      "accountingEntryManage": "経費・売掛金・会計期間を管理"
+      "accountingEntryManage": "経費・売掛金・会計期間を管理",
+      "payrollView": "給与記録を表示",
+      "payrollManage": "給与計算と支払いを管理"
     },
     "editorSubtitle": "役割の既定値を設定するか、特定のスタッフの例外を作成します。変更は次の操作から適用されます。",
     "roleDefaultsTab": "役割の既定値",

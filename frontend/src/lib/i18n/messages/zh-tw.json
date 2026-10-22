@@ -2265,7 +2265,8 @@
       "integrations": "整合",
       "system": "系統",
       "support": "支援",
-      "accounting": "會計"
+      "accounting": "會計",
+      "payroll": "薪資"
     },
     "capabilities": {
       "tablesView": "檢視桌位",
@@ -2328,7 +2329,9 @@
       "support": "聯絡支援並檢視診斷",
       "accountingView": "檢視總帳與財務報表",
       "accountingManage": "登錄與沖銷分錄",
-      "accountingEntryManage": "管理支出、應收款項與會計期間"
+      "accountingEntryManage": "管理支出、應收款項與會計期間",
+      "payrollView": "查看薪資紀錄",
+      "payrollManage": "管理薪資與付款"
     },
     "editorSubtitle": "設定角色預設值，或為單一位員工建立例外。變更會從他的下一個操作開始生效。",
     "roleDefaultsTab": "角色預設值",

@@ -2374,7 +2374,8 @@
       "integrations": "Integraciones",
       "system": "Sistema",
       "support": "Soporte",
-      "accounting": "Contabilidad"
+      "accounting": "Contabilidad",
+      "payroll": "Nóminas"
     },
     "capabilities": {
       "tablesView": "Ver mesas",
@@ -2437,7 +2438,9 @@
       "inventoryManage": "Gestionar insumos y recetas",
       "accountingView": "Ver el libro mayor y los informes financieros",
       "accountingManage": "Registrar y revertir asientos contables",
-      "accountingEntryManage": "Gestionar gastos, cuentas por cobrar y periodos fiscales"
+      "accountingEntryManage": "Gestionar gastos, cuentas por cobrar y periodos fiscales",
+      "payrollView": "Ver registros de nómina",
+      "payrollManage": "Gestionar nóminas y pagos"
     },
     "editorSubtitle": "Configura los valores predeterminados de los roles o crea una excepción para un miembro del personal. Los cambios se aplican en su próxima acción.",
     "roleDefaultsTab": "Valores del rol",

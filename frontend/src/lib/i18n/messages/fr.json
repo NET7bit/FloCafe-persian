@@ -2374,7 +2374,8 @@
       "integrations": "Intégrations",
       "system": "Système",
       "support": "Assistance",
-      "accounting": "Comptabilité"
+      "accounting": "Comptabilité",
+      "payroll": "Paie"
     },
     "capabilities": {
       "tablesView": "Consulter les tables",
@@ -2437,7 +2438,9 @@
       "inventoryManage": "Gérer les approvisionnements et les recettes",
       "accountingView": "Voir le grand livre et les rapports financiers",
       "accountingManage": "Saisir et contre-passer les écritures",
-      "accountingEntryManage": "Gérer les dépenses, les créances et les périodes fiscales"
+      "accountingEntryManage": "Gérer les dépenses, les créances et les périodes fiscales",
+      "payrollView": "Voir les dossiers de paie",
+      "payrollManage": "Gérer les paies et les paiements"
     },
     "editorSubtitle": "Configurez les permissions par défaut d'un rôle ou créez une exception pour un membre du personnel. Les modifications s'appliquent à sa prochaine action.",
     "roleDefaultsTab": "Permissions du rôle",

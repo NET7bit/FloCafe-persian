@@ -2265,7 +2265,8 @@
       "integrations": "Integraties",
       "system": "Systeem",
       "support": "Ondersteuning",
-      "accounting": "Boekhouding"
+      "accounting": "Boekhouding",
+      "payroll": "Salaris"
     },
     "capabilities": {
       "tablesView": "Tafels bekijken",
@@ -2328,7 +2329,9 @@
       "inventoryManage": "Voorraadartikelen en recepten beheren",
       "accountingView": "Grootboek en financiële rapporten bekijken",
       "accountingManage": "Journaalposten boeken en terugdraaien",
-      "accountingEntryManage": "Uitgaven, vorderingen en boekperioden beheren"
+      "accountingEntryManage": "Uitgaven, vorderingen en boekperioden beheren",
+      "payrollView": "Salarisgegevens bekijken",
+      "payrollManage": "Salarisruns en betalingen beheren"
     },
     "editorSubtitle": "Standaardinstellingen per rol configureren of een uitzondering maken voor één medewerker. Wijzigingen gelden vanaf diens volgende actie.",
     "roleDefaultsTab": "Rolstandaarden",

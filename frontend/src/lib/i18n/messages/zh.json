@@ -2374,7 +2374,8 @@
       "integrations": "集成",
       "system": "系统",
       "support": "支持",
-      "accounting": "会计"
+      "accounting": "会计",
+      "payroll": "工资"
     },
     "capabilities": {
       "tablesView": "查看桌位",
@@ -2437,7 +2438,9 @@
       "support": "联系支持并查看诊断",
       "accountingView": "查看总账和财务报表",
       "accountingManage": "录入和冲销会计分录",
-      "accountingEntryManage": "管理支出、应收账款和会计期间"
+      "accountingEntryManage": "管理支出、应收账款和会计期间",
+      "payrollView": "查看工资记录",
+      "payrollManage": "管理工资单和付款"
     },
     "editorSubtitle": "配置角色默认权限，或为某位员工设置例外。更改将在其下次操作时生效。",
     "roleDefaultsTab": "角色默认值",

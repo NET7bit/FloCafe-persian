@@ -2265,7 +2265,8 @@
       "integrations": "انٹیگریشنز",
       "system": "سسٹم",
       "support": "معاونت",
-      "accounting": "محاسبات"
+      "accounting": "محاسبات",
+      "payroll": "تنخواہ"
     },
     "capabilities": {
       "tablesView": "میزیں دیکھیں",
@@ -2328,7 +2329,9 @@
       "inventoryManage": "سامان اور ترکیبات منظم کریں",
       "accountingView": "لیجر اور مالیاتی رپورٹس دیکھیں",
       "accountingManage": "جرنل اندراج درج اور واپس کریں",
-      "accountingEntryManage": "اخراجات، وصولیوں اور مالی ادوار کا انتظام کریں"
+      "accountingEntryManage": "اخراجات، وصولیوں اور مالی ادوار کا انتظام کریں",
+      "payrollView": "تنخواہ کے ریکارڈ دیکھیں",
+      "payrollManage": "تنخواہ اور ادائیگیاں منظم کریں"
     },
     "editorSubtitle": "کردار کی طے شدہ ترتیبات ترتیب دیں یا ایک ملازم کے لیے استثنیٰ کریں۔ تبدیلیاں اس کے اگلے عمل پر لاگو ہوں گی۔",
     "roleDefaultsTab": "کردار کی طے شدہ ترتیبات",

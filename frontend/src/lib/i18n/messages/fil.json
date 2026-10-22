@@ -2374,7 +2374,8 @@
       "integrations": "Mga Integration",
       "system": "System",
       "support": "Suporta",
-      "accounting": "Kontabilidad"
+      "accounting": "Kontabilidad",
+      "payroll": "Pasahod"
     },
     "capabilities": {
       "tablesView": "Tingnan ang mga mesa",
@@ -2437,7 +2438,9 @@
       "inventoryManage": "Pamahalaan ang mga supply at recipe",
       "accountingView": "Tingnan ang ledger at mga ulat sa pananalapi",
       "accountingManage": "I-post at i-reverse ang mga journal entry",
-      "accountingEntryManage": "Pamahalaan ang mga gastos, natatanggap at panahon ng piskal"
+      "accountingEntryManage": "Pamahalaan ang mga gastos, natatanggap at panahon ng piskal",
+      "payrollView": "Tingnan ang mga tala ng sahod",
+      "payrollManage": "Pamahalaan ang payroll at mga bayad"
     },
     "editorSubtitle": "I-configure ang mga default ng tungkulin o gumawa ng eksepsiyon para sa isang miyembro ng staff. Magkakabisa ang mga pagbabago sa susunod nilang aksyon.",
     "roleDefaultsTab": "Mga default ng tungkulin",

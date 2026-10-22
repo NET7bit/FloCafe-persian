@@ -2374,7 +2374,8 @@
       "integrations": "عمليات الدمج",
       "system": "النظام",
       "support": "الدعم",
-      "accounting": "المحاسبة"
+      "accounting": "المحاسبة",
+      "payroll": "الرواتب"
     },
     "capabilities": {
       "tablesView": "عرض الطاولات",
@@ -2437,7 +2438,9 @@
       "inventoryManage": "إدارة المواد والوصفات",
       "accountingView": "عرض دفتر الأستاذ والتقارير المالية",
       "accountingManage": "تسجيل وقيود اليومية وعكسها",
-      "accountingEntryManage": "إدارة المصروفات والمستحقات والفترات المالية"
+      "accountingEntryManage": "إدارة المصروفات والمستحقات والفترات المالية",
+      "payrollView": "عرض سجلات الرواتب",
+      "payrollManage": "إدارة كشوف الرواتب والمدفوعات"
     },
     "editorSubtitle": "قم بتكوين إعدادات الأدوار الافتراضية أو أنشئ استثناءً لموظف واحد. يتم تطبيق التغييرات على إجراءاته التالية.",
     "roleDefaultsTab": "إعدادات الدور",

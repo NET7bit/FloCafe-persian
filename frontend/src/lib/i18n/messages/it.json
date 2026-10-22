@@ -2374,7 +2374,8 @@
       "integrations": "Integrazioni",
       "system": "Sistema",
       "support": "Assistenza",
-      "accounting": "Contabilità"
+      "accounting": "Contabilità",
+      "payroll": "Paghe"
     },
     "capabilities": {
       "tablesView": "Visualizza i tavoli",
@@ -2437,7 +2438,9 @@
       "support": "Contatta l'assistenza e visualizza le diagnostiche",
       "accountingView": "Visualizza il libro mastro e i report finanziari",
       "accountingManage": "Registra e storna le scritture contabili",
-      "accountingEntryManage": "Gestisci spese, crediti e periodi fiscali"
+      "accountingEntryManage": "Gestisci spese, crediti e periodi fiscali",
+      "payrollView": "Visualizza i dati delle paghe",
+      "payrollManage": "Gestisci paghe e pagamenti"
     },
     "editorSubtitle": "Configura le impostazioni predefinite del ruolo o crea un'eccezione per un membro dello staff. Le modifiche si applicano alla prossima azione.",
     "roleDefaultsTab": "Impostazioni ruolo",

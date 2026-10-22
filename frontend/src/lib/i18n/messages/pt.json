@@ -2374,7 +2374,8 @@
       "integrations": "Integrações",
       "system": "Sistema",
       "support": "Suporte",
-      "accounting": "Contabilidade"
+      "accounting": "Contabilidade",
+      "payroll": "Folha de pagamento"
     },
     "capabilities": {
       "tablesView": "Ver mesas",
@@ -2437,7 +2438,9 @@
       "inventoryManage": "Gerenciar insumos e receitas",
       "accountingView": "Ver o razão e os relatórios financeiros",
       "accountingManage": "Lançar e estornar partidas contábeis",
-      "accountingEntryManage": "Gerir despesas, valores a receber e períodos fiscais"
+      "accountingEntryManage": "Gerir despesas, valores a receber e períodos fiscais",
+      "payrollView": "Ver registros da folha",
+      "payrollManage": "Gerir folhas e pagamentos"
     },
     "editorSubtitle": "Configure os padrões da função ou crie uma exceção para um funcionário. As alterações se aplicam na próxima ação dele.",
     "roleDefaultsTab": "Padrões da função",

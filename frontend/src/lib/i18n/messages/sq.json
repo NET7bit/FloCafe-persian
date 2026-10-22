@@ -2265,7 +2265,8 @@
       "integrations": "Integrimet",
       "system": "Sistemi",
       "support": "Mbështetje",
-      "accounting": "Kontabiliteti"
+      "accounting": "Kontabiliteti",
+      "payroll": "Pagat"
     },
     "capabilities": {
       "tablesView": "Shiko tavat",
@@ -2328,7 +2329,9 @@
       "inventoryManage": "Menaxhoni furnizimet dhe recetat",
       "accountingView": "Shiko librin kryesor dhe raportet financiare",
       "accountingManage": "Regjistro dhe kthe regjistrimet e ditarit",
-      "accountingEntryManage": "Menaxho shpenzimet, të arkëtueshmet dhe periudhat fiskale"
+      "accountingEntryManage": "Menaxho shpenzimet, të arkëtueshmet dhe periudhat fiskale",
+      "payrollView": "Shiko regjistrat e pagave",
+      "payrollManage": "Menaxho listëpagesat dhe pagesat"
     },
     "editorSubtitle": "Konfiguroni vlerat e parazgjedhura të rolit ose bëni një përjashtim për një staf. Ndryshimet zbatohen në veprimin e tij të ardhshëm.",
     "roleDefaultsTab": "Vlerat e parazgjedhura të rolit",

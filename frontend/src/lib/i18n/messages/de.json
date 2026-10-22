@@ -2374,7 +2374,8 @@
       "integrations": "Integrationen",
       "system": "System",
       "support": "Support",
-      "accounting": "Buchhaltung"
+      "accounting": "Buchhaltung",
+      "payroll": "Lohnabrechnung"
     },
     "capabilities": {
       "tablesView": "Tische ansehen",
@@ -2437,7 +2438,9 @@
       "inventoryManage": "Vorräte und Rezepte verwalten",
       "accountingView": "Hauptbuch und Finanzberichte anzeigen",
       "accountingManage": "Journalbuchungen erfassen und stornieren",
-      "accountingEntryManage": "Ausgaben, Forderungen und Geschäftsperioden verwalten"
+      "accountingEntryManage": "Ausgaben, Forderungen und Geschäftsperioden verwalten",
+      "payrollView": "Lohnunterlagen ansehen",
+      "payrollManage": "Abrechnung und Zahlungen verwalten"
     },
     "editorSubtitle": "Konfigurieren Sie Rollenvorgaben oder legen Sie eine Ausnahme für ein Teammitglied fest. Änderungen gelten ab der nächsten Aktion.",
     "roleDefaultsTab": "Rollenvorgaben",
