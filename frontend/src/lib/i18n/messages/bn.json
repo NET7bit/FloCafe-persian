@@ -480,8 +480,10 @@
     "user": "ব্যবহারকারী",
     "whatsapp": "হোয়াটসঅ্যাপ",
     "inventory": "ইনভেন্টরি",
+    "purchases": "ক্রয়",
     "tables": "টেবিল",
-    "accounting": "হিসাবরক্ষণ"
+    "accounting": "হিসাবরক্ষণ",
+    "payroll": "বেতন"
   },
   "orders": {
     "active": "সক্রিয়",

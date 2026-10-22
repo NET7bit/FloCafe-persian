@@ -481,7 +481,9 @@
     "user": "प्रयोगकर्ता",
     "whatsapp": "व्हाट्सएप",
     "inventory": "सूची",
-    "accounting": "लेखा"
+    "purchases": "खरिद",
+    "accounting": "लेखा",
+    "payroll": "तलब"
   },
   "orders": {
     "active": "सक्रिय",

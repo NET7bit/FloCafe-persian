@@ -480,8 +480,10 @@
     "user": "صارف",
     "whatsapp": "WhatsApp",
     "inventory": "اسٹاک",
+    "purchases": "خریداری",
     "tables": "میزیں",
-    "accounting": "اکاؤنٹنگ"
+    "accounting": "اکاؤنٹنگ",
+    "payroll": "تنخواہ"
   },
   "orders": {
     "active": "فعال",

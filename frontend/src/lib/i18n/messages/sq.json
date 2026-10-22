@@ -481,7 +481,9 @@
     "user": "Përdoruesi",
     "whatsapp": "WhatsApp",
     "inventory": "Inventari",
-    "accounting": "Kontabilitet"
+    "purchases": "Blerjet",
+    "accounting": "Kontabilitet",
+    "payroll": "Pagat"
   },
   "orders": {
     "active": "Aktive",

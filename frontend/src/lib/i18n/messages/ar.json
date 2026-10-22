@@ -590,7 +590,9 @@
     "uptimeLabel": "أعلى: ",
     "user": "المستخدم",
     "whatsapp": "واتساب",
-    "inventory": "المخزون"
+    "inventory": "المخزون",
+    "purchases": "المشتريات",
+    "payroll": "الرواتب"
   },
   "orders": {
     "active": "نشط",

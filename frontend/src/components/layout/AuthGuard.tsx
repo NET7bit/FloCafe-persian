@@ -18,6 +18,9 @@ export const LANDING_PAGE_CANDIDATES = [
   ['whatsapp.use', '/whatsapp'],
   ['catalog.manage', '/products'],
   ['inventory.view', '/inventory'],
+  ['supplies.manage', '/purchases'],
+  ['payroll.view', '/payroll'],
+  ['payroll.manage', '/payroll'],
   ['customers.view', '/customers'],
   ['staff.view', '/staff'],
   ['settings.view', '/settings'],
@@ -36,6 +39,8 @@ export const PAGE_PERMISSIONS = [
   ['/orders', 'orders.read'],
   ['/products', 'catalog.manage'],
   ['/inventory', 'inventory.view'],
+  ['/purchases', 'supplies.manage'],
+  ['/payroll', 'payroll.view'],
   ['/tables', 'tables.view'],
   ['/customers', 'customers.view'],
   ['/whatsapp', 'whatsapp.use'],
@@ -118,6 +123,8 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       const pagePermission = PAGE_PERMISSIONS.find(([prefix]) => pathname === prefix || pathname?.startsWith(`${prefix}/`));
       const canOpenStaff = pathname === '/staff'
         && (tenantCan(currentTenant, 'staff.view') || tenantCan(currentTenant, 'authorization.manage'));
+      const canOpenPayroll = pathname === '/payroll'
+        && (tenantCan(currentTenant, 'payroll.view') || tenantCan(currentTenant, 'payroll.manage'));
       const canOpenSettings = pathname === '/settings'
         && [
           'settings.view', 'settings.manage', 'tax-packs.view-test', 'tax-configuration.manage',
@@ -125,8 +132,9 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
           'payment-methods.manage', 'cloud.manage', 'cloud.account.manage', 'google-drive.manage',
           'database.manage', 'mobile-access.manage', 'kitchen.stations.manage', 'whatsapp.manage',
         ].some((permission) => tenantCan(currentTenant, permission as import('@shared/permissions').PermissionId));
-      if ((pagePermission && !tenantCan(currentTenant, pagePermission[1]))
+      if ((pagePermission && pathname !== '/payroll' && !tenantCan(currentTenant, pagePermission[1]))
         || (pathname === '/staff' && !canOpenStaff)
+        || (pathname === '/payroll' && !canOpenPayroll)
         || (pathname === '/settings' && !canOpenSettings)) {
         router.replace(getLandingPage(currentTenant));
       }

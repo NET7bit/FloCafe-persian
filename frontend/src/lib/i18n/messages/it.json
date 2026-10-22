@@ -590,7 +590,9 @@
     "user": "Utente",
     "whatsapp": "WhatsApp",
     "inventory": "Scorte",
-    "tables": "Tavoli"
+    "purchases": "Acquisti",
+    "tables": "Tavoli",
+    "payroll": "Paghe"
   },
   "orders": {
     "active": "Attivo",

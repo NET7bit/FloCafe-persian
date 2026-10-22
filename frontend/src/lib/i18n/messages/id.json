@@ -590,7 +590,9 @@
     "user": "Pengguna",
     "whatsapp": "WhatsApp",
     "inventory": "Persediaan",
-    "tables": "Meja"
+    "purchases": "Pembelian",
+    "tables": "Meja",
+    "payroll": "Penggajian"
   },
   "orders": {
     "active": "Aktif",

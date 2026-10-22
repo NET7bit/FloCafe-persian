@@ -590,7 +590,9 @@
     "user": "사용자",
     "whatsapp": "WhatsApp",
     "inventory": "재고",
-    "tables": "테이블"
+    "purchases": "구매",
+    "tables": "테이블",
+    "payroll": "급여"
   },
   "orders": {
     "active": "진행 중",

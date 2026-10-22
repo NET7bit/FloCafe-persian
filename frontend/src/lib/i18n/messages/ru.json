@@ -480,8 +480,10 @@
     "user": "Пользователь",
     "whatsapp": "WhatsApp",
     "inventory": "Склад",
+    "purchases": "Закупки",
     "tables": "Столы",
-    "accounting": "Бухгалтерия"
+    "accounting": "Бухгалтерия",
+    "payroll": "Зарплата"
   },
   "orders": {
     "active": "Активные",

@@ -590,7 +590,9 @@
     "user": "کاربر",
     "whatsapp": "واتساپ",
     "inventory": "موجودی",
-    "tables": "میزها"
+    "purchases": "خرید و تأمین",
+    "tables": "میزها",
+    "payroll": "حقوق و دستمزد"
   },
   "orders": {
     "active": "فعال",

@@ -480,8 +480,10 @@
     "user": "Người dùng",
     "whatsapp": "WhatsApp",
     "inventory": "Kho",
+    "purchases": "Mua hàng",
     "tables": "Bàn",
-    "accounting": "Kế toán"
+    "accounting": "Kế toán",
+    "payroll": "Tiền lương"
   },
   "orders": {
     "active": "Đang hoạt động",

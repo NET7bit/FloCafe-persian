@@ -590,7 +590,9 @@
     "user": "User",
     "whatsapp": "WhatsApp",
     "inventory": "Inventory",
-    "tables": "Tables"
+    "purchases": "Purchases",
+    "tables": "Tables",
+    "payroll": "Payroll"
   },
   "orders": {
     "active": "Active",

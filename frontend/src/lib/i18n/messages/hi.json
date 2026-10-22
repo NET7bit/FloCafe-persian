@@ -480,8 +480,10 @@
     "user": "उपयोगकर्ता",
     "whatsapp": "WhatsApp",
     "inventory": "इन्वेंटरी",
+    "purchases": "खरीद",
     "tables": "टेबल",
-    "accounting": "लेखांकन"
+    "accounting": "लेखांकन",
+    "payroll": "वेतन"
   },
   "orders": {
     "active": "सक्रिय",

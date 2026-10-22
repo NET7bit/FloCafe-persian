@@ -480,8 +480,10 @@
     "user": "Gebruiker",
     "whatsapp": "WhatsApp",
     "inventory": "Voorraad",
+    "purchases": "Inkoop",
     "tables": "Tafels",
-    "accounting": "Boekhouding"
+    "accounting": "Boekhouding",
+    "payroll": "Salaris"
   },
   "orders": {
     "active": "Actief",

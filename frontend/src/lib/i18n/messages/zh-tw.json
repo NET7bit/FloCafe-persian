@@ -481,7 +481,9 @@
     "user": "使用者",
     "whatsapp": "WhatsApp",
     "inventory": "庫存",
-    "accounting": "會計"
+    "purchases": "採購",
+    "accounting": "會計",
+    "payroll": "薪資"
   },
   "orders": {
     "active": "進行中",

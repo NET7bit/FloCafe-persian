@@ -481,7 +481,9 @@
     "user": "ผู้ใช้",
     "whatsapp": "WhatsApp",
     "inventory": "สินค้าคงคลัง",
-    "accounting": "บัญชี"
+    "purchases": "การจัดซื้อ",
+    "accounting": "บัญชี",
+    "payroll": "เงินเดือน"
   },
   "orders": {
     "active": "ดำเนินการอยู่",

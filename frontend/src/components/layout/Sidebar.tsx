@@ -23,6 +23,8 @@ import {
   Monitor,
   Boxes,
   Landmark,
+  Truck,
+  WalletCards,
   type LucideIcon,
 } from 'lucide-react';
 import { useTranslations, type AppConfig } from 'use-intl';
@@ -75,6 +77,8 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { href: '/whatsapp', labelKey: 'whatsapp', icon: MessageCircle, permission: 'whatsapp.use', businessTypes: null },
   { href: '/products', labelKey: 'products', icon: Package, permission: 'catalog.manage', businessTypes: null },
   { href: '/inventory', labelKey: 'inventory', icon: Boxes, permission: 'inventory.view', businessTypes: null },
+  { href: '/purchases', labelKey: 'purchases', icon: Truck, permission: 'supplies.manage', businessTypes: null },
+  { href: '/payroll', labelKey: 'payroll', icon: WalletCards, permission: 'payroll.view', businessTypes: null },
   // Fork-only accounting module: financial surfaces stay owner/manager scoped.
   { href: '/accounting', labelKey: 'accounting', icon: Landmark, permission: 'reports.view', businessTypes: null },
   { href: '/tables', labelKey: 'tables', icon: Grid3X3, permission: 'tables.view', businessTypes: ['restaurant'] },
@@ -111,7 +115,9 @@ export default function AppSidebar() {
     if (item.href === '/settings?tab=kds' && !kdsEnabled) return false;
     // WhatsApp integration not enabled on this tenant → hide the nav entry.
     if (item.href === '/whatsapp' && !whatsappEnabled) return false;
-    const permitted = item.href === '/staff'
+    const permitted = item.href === '/payroll'
+      ? tenantCan(currentTenant, 'payroll.view') || tenantCan(currentTenant, 'payroll.manage')
+      : item.href === '/staff'
       ? tenantCan(currentTenant, 'staff.view') || tenantCan(currentTenant, 'authorization.manage')
       : item.href === '/settings'
         ? [
