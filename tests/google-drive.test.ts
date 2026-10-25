@@ -48,8 +48,13 @@ const mockShell = {
   openExternal: async (url: string) => { openedUrls.push(url); },
 };
 
+// The service resolves `@googleapis/drive` lazily, so a broken install only surfaces on first
+// use. Flipping this makes that first use throw synchronously.
+let driveLoadFails = false;
+
 Module._load = function (request: string, parent: unknown, isMain: boolean) {
   if (request === 'electron') return { app: mockApp, safeStorage: mockSafeStorage, shell: mockShell };
+  if (driveLoadFails && request === '@googleapis/drive') throw new Error('simulated @googleapis/drive load failure');
   return originalLoad.apply(this, arguments as any);
 };
 
@@ -1113,6 +1118,47 @@ async function main(): Promise<void> {
   assert.equal(s.secure_storage_available, false, 'surfaces unavailable secure storage in status');
   encryptionAvailable = true;
   console.log('   ✓ getStatus() surfaces secure_storage_available for the "can\'t store tokens safely" UI state');
+
+  // ── a package-load failure inside the loopback callback must settle ──
+  // `driveApi()` resolves `@googleapis/drive` on first use and throws synchronously when the
+  // package cannot be loaded. `runLoopbackFlow` calls it from a `server.listen` callback, which
+  // runs outside the promise executor: an escaping throw would be an uncaught exception that also
+  // leaves the loopback socket listening. The service is re-required so the lazy module cache
+  // starts empty no matter what earlier cases already loaded.
+  {
+    const servicePath = require.resolve('../main/services/google-drive');
+    const cachedService = require.cache[servicePath];
+    const http = require('node:http') as typeof import('node:http');
+    const originalCreateServer = http.createServer;
+    let captured: any = null;
+    http.createServer = function (this: unknown, ...args: any[]) {
+      captured = (originalCreateServer as any).apply(this, args);
+      return captured;
+    } as typeof http.createServer;
+
+    const openedBefore = openedUrls.length;
+    delete require.cache[servicePath];
+    driveLoadFails = true;
+    try {
+      const fresh = require('../main/services/google-drive') as typeof gd;
+      const outcome = await Promise.race([
+        (fresh.googleDrive as any).runLoopbackFlow({ clientId: 'test-client-id', clientSecret: 'test-client-secret' }).then(
+          () => ({ code: 'resolved' }),
+          (error: any) => ({ code: String(error?.code) }),
+        ),
+        new Promise<{ code: string }>((resolve) => { setTimeout(() => resolve({ code: 'never-settled' }), 5000).unref(); }),
+      ]);
+      assert.equal(outcome.code, 'offline', 'a synchronous package-load failure rejects with the structured offline error');
+      assert.ok(captured, 'the loopback flow opened a server before failing');
+      assert.equal(captured.listening, false, 'the loopback server is closed when the flow fails');
+      assert.equal(openedUrls.length, openedBefore, 'no authorization URL is opened when the client cannot be built');
+    } finally {
+      driveLoadFails = false;
+      http.createServer = originalCreateServer;
+      if (cachedService) require.cache[servicePath] = cachedService;
+    }
+    console.log('   ✓ a package-load failure in the loopback callback rejects `offline` and closes the server');
+  }
 }
 
 main()

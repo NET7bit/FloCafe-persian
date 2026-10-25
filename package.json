@@ -47,6 +47,7 @@
     "test:dev-tooling": "ts-node --transpile-only -P tests/tsconfig.json tests/dev-tooling-scripts.test.ts && npm run test:phase2 && npm run test:runtime-recovery && npm run test:backend-health && npm run test:url-allowlist && npm run test:static-routes",
     "test:script-coverage": "node scripts/ci/validate-test-script-coverage.cjs && node tests/test-script-coverage.test.cjs && ts-node --transpile-only -P tests/tsconfig.json tests/test-harness-assertions.test.ts",
     "test:shutdown-lifecycle": "npm run build && node tests/run-electron-node-test.cjs tests/shutdown-lifecycle.test.ts",
+    "test:lazy-startup-modules": "ts-node --transpile-only -P tests/tsconfig.json tests/lazy-startup-modules.test.ts",
     "test:redos-hardening": "node tests/run-electron-node-test.cjs tests/redos-hardening.test.ts",
     "test:phase2": "ts-node --transpile-only -P tests/tsconfig.json tests/auth-state-recovery.test.ts && node tests/run-electron-node-test.cjs tests/login-email-normalization.test.ts && node tests/run-electron-node-test.cjs tests/master-pin.test.ts && node tests/run-electron-node-test.cjs tests/manager-pin-verification.test.ts && node tests/run-electron-node-test.cjs tests/jwt-logout-lifecycle.test.ts && node tests/run-electron-node-test.cjs tests/kds-websocket-revalidation.test.ts && node tests/run-electron-node-test.cjs tests/token-revocation-fail-closed.test.ts",
     "test:url-allowlist": "ts-node --transpile-only -P tests/tsconfig.json tests/url-allowlist.test.ts",

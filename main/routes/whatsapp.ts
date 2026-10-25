@@ -4,7 +4,7 @@ import { asyncHandler } from '../middleware/async-handler';
 import { getDatabase, getSettingValue, upsertSettings } from '../db';
 import { getHttpRequestSignal, trackHttpRequestWork } from '../shutdown';
 import * as whatsapp from '../services/whatsapp';
-import * as QRCode from 'qrcode';
+import { loadQRCode } from '../lib/qrcode';
 import { parsePhoneE164 } from '../lib/phone';
 
 const router = Router();
@@ -45,7 +45,7 @@ router.get('/qr', requirePermission('whatsapp.manage'), asyncHandler(async (_req
     res.status(404).json({ error: 'no QR available', reason: 'no_qr' });
     return;
   }
-  const dataUrl = await QRCode.toDataURL(status.qr, { margin: 1, width: 320 });
+  const dataUrl = await (await loadQRCode()).toDataURL(status.qr, { margin: 1, width: 320 });
   res.json({ dataUrl });
 }));
 

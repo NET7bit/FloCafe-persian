@@ -1,6 +1,6 @@
 /** Returns catalog of companion apps and download QR codes for settings display. */
 import { Router, Request, Response } from 'express';
-import QRCode from 'qrcode';
+import { loadQRCode } from '../lib/qrcode';
 import { asyncHandler } from '../middleware/async-handler';
 
 const router = Router();
@@ -30,7 +30,7 @@ async function toAppResponse(app: AppEntry) {
   let qrDataUrl: string | null = null;
   if (primaryUrl) {
     try {
-      qrDataUrl = await QRCode.toDataURL(primaryUrl, { errorCorrectionLevel: 'M', width: 256 });
+      qrDataUrl = await (await loadQRCode()).toDataURL(primaryUrl, { errorCorrectionLevel: 'M', width: 256 });
     } catch (err) {
       console.warn(`[MoreApps] QR generation failed for ${app.id}:`, err);
     }

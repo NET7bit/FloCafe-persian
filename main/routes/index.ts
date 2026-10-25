@@ -66,7 +66,7 @@ import { applyRecipeSnapshot, parseRecipeSnapshot } from '../services/recipes';
 import { recordItemCancelCogsAccounting, recordItemRestoreCogsAccounting } from '../services/accounting-cogs-adapter';
 import { cloudSync } from '../services/cloud-sync';
 import { parsePhoneE164, stripPhoneDigits } from '../lib/phone';
-import QRCode from 'qrcode';
+import { loadQRCode } from '../lib/qrcode';
 import { asyncHandler } from '../middleware/async-handler';
 import expressRateLimit from 'express-rate-limit';
 
@@ -192,7 +192,7 @@ export function registerRoutes(app: Express): void {
         return res.json({
           pairing_code: cached.code,
           expires_at: cached.expiresAt,
-          qr_data_url: await QRCode.toDataURL(cached.code, { errorCorrectionLevel: 'M', width: 256 }),
+          qr_data_url: await (await loadQRCode()).toDataURL(cached.code, { errorCorrectionLevel: 'M', width: 256 }),
         });
       }
       const { code, expires_at } = await cloudSync.generatePairingCode(false);
@@ -200,7 +200,7 @@ export function registerRoutes(app: Express): void {
       res.json({
         pairing_code: code,
         expires_at,
-        qr_data_url: await QRCode.toDataURL(code, { errorCorrectionLevel: 'M', width: 256 }),
+        qr_data_url: await (await loadQRCode()).toDataURL(code, { errorCorrectionLevel: 'M', width: 256 }),
       });
     } catch (error: any) {
       res.status(mobilePairingErrorStatus(error)).json({ error: mobilePairingErrorMessage(error) });
@@ -215,7 +215,7 @@ export function registerRoutes(app: Express): void {
       res.json({
         pairing_code: code,
         expires_at,
-        qr_data_url: await QRCode.toDataURL(code, { errorCorrectionLevel: 'M', width: 256 }),
+        qr_data_url: await (await loadQRCode()).toDataURL(code, { errorCorrectionLevel: 'M', width: 256 }),
       });
     } catch (error: any) {
       res.status(mobilePairingErrorStatus(error)).json({ error: mobilePairingErrorMessage(error) });

@@ -218,5 +218,6 @@
   "test:kitchen-delivery-enforcement",
   "test:migration-registry",
   "test:import-restore-y1-y2-hardening",
+  "test:lazy-startup-modules",
   "test:accounting-ui"
 ]

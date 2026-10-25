@@ -6,7 +6,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { once } from 'node:events';
-import { auth as googleAuth, drive } from '@googleapis/drive';
 import { isSafeExternalUrl } from '../security/url-allowlist';
 import {
   abortDatabaseReplacementJournal,
@@ -28,8 +27,34 @@ import { SHUTDOWN_TIMEOUT_MS } from '../shutdown';
 import { clearInMemoryRevokedTokens, clearUserAuthCache } from '../middleware/security';
 import { clearJWTSecretCache } from '../security/jwt-secret';
 
-type OAuth2Client = InstanceType<typeof googleAuth.OAuth2>;
-type DriveClient = ReturnType<typeof drive>;
+// `@googleapis/drive` pulls ~56 modules (google-auth-library, googleapis-common,
+// gaxios, ...). Drive is an optional feature and nothing needs the client until an
+// operation actually runs, but this module sits on the startup import graph — so the
+// dependency is resolved on first use instead of at module load.
+type DriveApi = typeof import('@googleapis/drive');
+let driveApiModule: DriveApi | null = null;
+function driveApi(): DriveApi {
+  if (!driveApiModule) driveApiModule = require('@googleapis/drive') as DriveApi;
+  return driveApiModule;
+}
+
+type OAuth2Client = InstanceType<DriveApi['auth']['OAuth2']>;
+type DriveClient = ReturnType<DriveApi['drive']>;
+
+/**
+ * Builds the v3 Drive client.
+ *
+ * `drive()` forwards its own `this` into `getAPI(..., context)`, and the endpoint
+ * constructor stores it as `context.google`, which `googleapis-common` reads as
+ * `parameters.context.google?._options`. Calling it as `driveApi().drive(...)`
+ * therefore passed the module exports as the receiver, whereas the previous
+ * `import { drive }` form passed `undefined`. Destructuring keeps the original
+ * receiver so the lazy loader stays behaviourally identical to the static import.
+ */
+function driveV3(auth: OAuth2Client): DriveClient {
+  const { drive } = driveApi();
+  return drive({ version: 'v3', auth });
+}
 
 export const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 export const DRIVE_BACKUP_FOLDER_NAME = 'FloCafe Backups';
@@ -1037,14 +1062,14 @@ class GoogleDriveService {
     const marker = this.ensureInstallationMarker();
     const { code, redirectUri, verifier } = await this.runLoopbackFlow(creds, signal);
     this.throwIfStopping(signal);
-    const client = new googleAuth.OAuth2(creds.clientId, creds.clientSecret, redirectUri);
+    const client = new (driveApi().auth.OAuth2)(creds.clientId, creds.clientSecret, redirectUri);
     const tokenResult = await waitForDriveOperation(() => (client as OAuth2Client & { getToken: (options: unknown) => Promise<{ tokens: StoredTokens }> }).getToken({ code, codeVerifier: verifier }), signal, DRIVE_REQUEST_TIMEOUT_MS, 'Google Drive token exchange');
     const tokens = tokenResult.tokens;
     if (!tokens.refresh_token) throw createDriveError('reauth_required');
     client.setCredentials(tokens);
     const identity = await this.fetchAccountIdentity(client, signal);
     if (!identity.subject) throw createDriveError('reauth_required');
-    const candidateDrive = drive({ version: 'v3', auth: client });
+    const candidateDrive = driveV3(client);
     const existingSubjects = [current?.account_subject, settings.google_drive_account_subject].filter((subject): subject is string => typeof subject === 'string' && subject.length > 0);
     if (!allowSwitch && existingSubjects.some((subject) => subject !== identity.subject)) throw createDriveError('reauth_required');
     const preservedDestinations = this.readOwnedDestinations();
@@ -1260,7 +1285,7 @@ class GoogleDriveService {
     if (!safeId(folderId)) throw createDriveError('destination_invalid');
     return this.queueOperation(async (signal) => {
       const client = await this.getAuthorizedClient(signal);
-      const destination = await this.validateDestination(drive({ version: 'v3', auth: client }), folderId, this.ensureInstallationMarker(), signal);
+      const destination = await this.validateDestination(driveV3(client), folderId, this.ensureInstallationMarker(), signal);
       this.rememberDestination(destination.id);
       upsertSettings({ google_drive_destination_folder_id: destination.id, google_drive_destination_folder_name: destination.name, google_drive_folder_id: destination.id, google_drive_last_error_code: '' });
       return this.getStatus();
@@ -1277,7 +1302,7 @@ class GoogleDriveService {
       const result: { id: string; name: string; current: boolean }[] = [];
       for (const id of ids) {
         try {
-          const destination = await this.validateDestination(drive({ version: 'v3', auth: client }), id, marker, signal);
+          const destination = await this.validateDestination(driveV3(client), id, marker, signal);
           result.push({ id: destination.id, name: destination.name, current: destination.id === current });
         } catch (error) {
           const classified = classifyDriveError(error);
@@ -1292,7 +1317,7 @@ class GoogleDriveService {
     return this.queueOperation(async (signal) => {
       const client = await this.getAuthorizedClient(signal);
       const marker = this.ensureInstallationMarker();
-      const driveClient = drive({ version: 'v3', auth: client });
+      const driveClient = driveV3(client);
       let destination = await this.findExistingAppFolder(driveClient, marker, signal);
       if (!destination) {
         destination = await this.createAppFolder(driveClient, marker, signal);
@@ -1373,7 +1398,7 @@ class GoogleDriveService {
       const result: GoogleDriveRemoteBackup[] = [];
       for (const folderId of [...new Set([current, ...this.readOwnedDestinations()].filter((value): value is string => Boolean(value)))]) {
         try {
-          const files = await this.listFilesInDestination(drive({ version: 'v3', auth: client }), folderId, signal, { query: `appProperties has { key='flo_marker_version' and value='${MARKER_VERSION}' } and appProperties has { key='flo_installation_id' and value='${marker}' }` });
+          const files = await this.listFilesInDestination(driveV3(client), folderId, signal, { query: `appProperties has { key='flo_marker_version' and value='${MARKER_VERSION}' } and appProperties has { key='flo_installation_id' and value='${marker}' }` });
           for (const file of files) {
             const backup = this.toRemoteBackup(file, folderId);
             if (backup) result.push(backup);
@@ -1434,7 +1459,7 @@ class GoogleDriveService {
       this.throwIfStopping(signal);
       if (jobId) this.writeJob({ id: jobId, operation: 'backup', kind: backupKind, state: 'uploading', bytes_sent: 0, total_bytes: snapshot.byteCount, updated_at: now() });
       const client = await this.getAuthorizedClient(signal);
-      const driveClient = drive({ version: 'v3', auth: client });
+      const driveClient = driveV3(client);
       const destinationId = await this.resolveDestinationForUpload(driveClient, signal);
       if (!pending) throw createDriveError('unknown');
       pending.destination_folder_id = destinationId;
@@ -1519,7 +1544,7 @@ class GoogleDriveService {
       try {
         const operationSignal = AbortSignal.any([this.shutdownController.signal, signal]);
         const client = await this.getAuthorizedClient(operationSignal);
-        await this.applyRetention(drive({ version: 'v3', auth: client }), operationSignal);
+        await this.applyRetention(driveV3(client), operationSignal);
         const job = parseJob(this.readSettings().google_drive_job);
         if (job?.state === 'retention_pending') this.writeJob({ ...job, state: 'succeeded', updated_at: now() });
         upsertSettings({ google_drive_retention_status: '', google_drive_retention_retry_count: '', google_drive_next_retry_at: '', google_drive_last_error_code: '' });
@@ -1626,7 +1651,7 @@ class GoogleDriveService {
       this.writeJob({ id: jobId, operation: 'restore', state: 'restoring', updated_at: now() });
       const marker = this.ensureInstallationMarker();
       const client = await this.getAuthorizedClient(signal);
-      const driveClient = drive({ version: 'v3', auth: client });
+      const driveClient = driveV3(client);
       const remote = await this.getRemoteFile(driveClient, input.fileId, marker, signal);
       if (!remote) throw createDriveError('restore_validation_failed');
       const properties = this.appProperties(remote);
@@ -1900,7 +1925,7 @@ class GoogleDriveService {
     if (settings.google_drive_last_error_code === 'reauth_required') throw createDriveError('reauth_required');
     const clientIdFingerprint = crypto.createHash('sha256').update(creds.clientId).digest('hex').slice(0, 16);
     if (envelope.installation_id !== marker || !envelope.account_subject || !settings.google_drive_account_subject || envelope.account_subject !== settings.google_drive_account_subject || envelope.client_id_fingerprint !== clientIdFingerprint) throw createDriveError('reauth_required');
-    const client = new googleAuth.OAuth2(creds.clientId, creds.clientSecret);
+    const client = new (driveApi().auth.OAuth2)(creds.clientId, creds.clientSecret);
     client.setCredentials(envelope);
     let latestEnvelope: StoredTokenEnvelope = { ...envelope };
     client.on('tokens', (refreshed) => {
@@ -2198,13 +2223,21 @@ class GoogleDriveService {
       signal?.addEventListener('abort', abort, { once: true });
       server.on('error', () => finish(() => reject(createDriveError('offline'))));
       server.listen(0, '127.0.0.1', () => {
-        const address = server.address();
-        const port = typeof address === 'object' && address ? address.port : 0;
-        redirectUri = `http://127.0.0.1:${port}/oauth2callback`;
-        const client = new googleAuth.OAuth2(creds.clientId, creds.clientSecret, redirectUri);
-        const authUrl = client.generateAuthUrl({ access_type: 'offline', prompt: 'consent', scope: [DRIVE_FILE_SCOPE, 'openid', 'email'], state, code_challenge: pkce.challenge, code_challenge_method: 'S256' as never });
-        if (!isSafeGoogleAuthorizationUrl(authUrl)) return finish(() => reject(createDriveError('reauth_required')));
-        shell.openExternal(authUrl).catch(() => finish(() => reject(createDriveError('offline'))));
+        try {
+          const address = server.address();
+          const port = typeof address === 'object' && address ? address.port : 0;
+          redirectUri = `http://127.0.0.1:${port}/oauth2callback`;
+          const client = new (driveApi().auth.OAuth2)(creds.clientId, creds.clientSecret, redirectUri);
+          const authUrl = client.generateAuthUrl({ access_type: 'offline', prompt: 'consent', scope: [DRIVE_FILE_SCOPE, 'openid', 'email'], state, code_challenge: pkce.challenge, code_challenge_method: 'S256' as never });
+          if (!isSafeGoogleAuthorizationUrl(authUrl)) return finish(() => reject(createDriveError('reauth_required')));
+          shell.openExternal(authUrl).catch(() => finish(() => reject(createDriveError('offline'))));
+        } catch {
+          // `driveApi()` resolves `@googleapis/drive` on first use and throws synchronously when the
+          // package cannot be loaded. This callback runs outside the promise executor, so an escaping
+          // throw would be an uncaught exception that also leaves the loopback server listening.
+          // Settling through `finish` releases the timer, the abort listener and the socket once.
+          finish(() => reject(createDriveError('offline')));
+        }
       });
     });
   }

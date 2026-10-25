@@ -1,6 +1,6 @@
 /** Returns Server App local network access URLs for settings QR code rendering. */
 import { Router, Request, Response } from 'express';
-import QRCode from 'qrcode';
+import { loadQRCode } from '../lib/qrcode';
 import { getLocalIP, getAllLocalIPs } from '../server-state';
 import { getServerAppPort } from '../server-app-state';
 import { isServerAppEnabled } from '../db';
@@ -23,7 +23,7 @@ router.get('/', asyncHandler(async (_req: Request, res: Response) => {
     const ipsData = await Promise.all(allIps.map(async (localIp) => {
       const url = `http://${localIp}:${port}`;
       try {
-        const qr_data = await QRCode.toDataURL(url, { errorCorrectionLevel: 'M', width: 256 });
+        const qr_data = await (await loadQRCode()).toDataURL(url, { errorCorrectionLevel: 'M', width: 256 });
         return { ip: localIp, url, qr_data };
       } catch {
         return { ip: localIp, url, qr_data: null };
