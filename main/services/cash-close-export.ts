@@ -1,4 +1,3 @@
-import ExcelJS from 'exceljs';
 import { toCsvRow } from '../lib/csv';
 
 interface CashClosePaymentExportRow {
@@ -88,6 +87,9 @@ function serializeCsv(metrics: ReportMetric[], report: CashCloseExportBase): str
 }
 
 async function serializeXlsx(metrics: ReportMetric[], report: CashCloseExportBase): Promise<Buffer> {
+  // Loaded lazily for the same reason as daily-sales-export-files: exceljs is
+  // large and this module is reachable from the startup import graph.
+  const ExcelJS = (await import('exceljs')).default;
   const workbook = new ExcelJS.Workbook();
   const summary = workbook.addWorksheet('Summary');
   summary.columns = [

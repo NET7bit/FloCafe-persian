@@ -1,4 +1,3 @@
-import ExcelJS from 'exceljs';
 import { toCsvRow } from '../lib/csv';
 import {
   DAILY_SALES_ITEM_COLUMNS,
@@ -34,6 +33,10 @@ export async function serializeDailySalesExportXlsx(
   dataset: DailySalesExportDataset,
   options: { fractionDigits: number },
 ): Promise<Buffer> {
+  // Loaded lazily: exceljs is a large dependency (~23 MB, ~410 modules) and this
+  // module sits on the startup import graph via routes/reports. Eager loading it
+  // added seconds to cold startup, so it is deferred until an XLSX is requested.
+  const ExcelJS = (await import('exceljs')).default;
   const workbook = new ExcelJS.Workbook();
   const moneyFmt = moneyNumFmt(options.fractionDigits);
 
