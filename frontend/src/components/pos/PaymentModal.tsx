@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Wallet, ArrowLeftRight, CheckCircle2, Sparkles, User, Percent, Send, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import api from '@/lib/api';
@@ -29,6 +29,11 @@ import {
   type DiscountType,
 } from '@/lib/discount-settings';
 import { createPaymentIdempotencyKey } from '@/lib/payment-idempotency';
+import {
+  buildPaymentAttemptFingerprint,
+  resolvePaymentAttempt,
+  type PaymentAttempt,
+} from '@/lib/payment-attempt';
 
 interface Props {
   bill: Bill;
@@ -37,6 +42,13 @@ interface Props {
   onClose: () => void;
   onPaid: () => void;
   onBillUpdate?: (bill: Bill) => void;
+  /**
+   * Attempt owned by the screen that renders this modal, so closing and
+   * reopening the modal cannot forget an unresolved payment. Null means the
+   * owner holds no attempt for this bill.
+   */
+  paymentAttempt?: PaymentAttempt | null;
+  onPaymentAttemptChange?: (attempt: PaymentAttempt | null) => void;
 }
 
 interface Payment {
@@ -59,7 +71,10 @@ const BUILT_IN_PAYMENT_KEYS = {
   customer_account: 'methodCustomerAccount',
 } as const satisfies Record<'cash' | 'card' | 'customer_account', PosKey>;
 
-export default function PaymentModal({ bill, initialOverridePin, onClose, onPaid, onBillUpdate }: Props) {
+export default function PaymentModal({
+  bill, initialOverridePin, onClose, onPaid, onBillUpdate,
+  paymentAttempt = null, onPaymentAttemptChange,
+}: Props) {
   const remaining = Number(bill.balance);
   const cartCustomerId = useCartStore((s) => s.customerId);
   const cartCustomer = useCartStore((s) => s.customer);
@@ -95,10 +110,6 @@ export default function PaymentModal({ bill, initialOverridePin, onClose, onPaid
   const minorFactor = getCurrencyMinorUnitFactor(currencyCode);
   const toMinorUnits = (amount: number) => Math.round(amount * minorFactor);
 
-  const idempotencyKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    idempotencyKeyRef.current = null;
-  }, [bill.id]);
   const [justPaid, setJustPaid] = useState(false);
   const [sendingWa, setSendingWa] = useState(false);
   const [pointsEarned, setPointsEarned] = useState(0);
@@ -130,6 +141,16 @@ export default function PaymentModal({ bill, initialOverridePin, onClose, onPaid
   const [applyingDiscount, setApplyingDiscount] = useState(false);
   const [loyaltySettings, setLoyaltySettings] = useState<{ loyalty_enabled: boolean } | null>(null);
   const [amountTarget, setAmountTarget] = useState<AmountTarget>(null);
+  // When the owner passes a change handler the attempt lives above this modal;
+  // otherwise (the orders screen) it is kept here, which still survives retries
+  // within the same mount. No reset is needed on bill change: the fingerprint
+  // carries the bill id, so an attempt from another bill can never match.
+  const [internalAttempt, setInternalAttempt] = useState<PaymentAttempt | null>(null);
+  const ownedAttempt = onPaymentAttemptChange ? (paymentAttempt ?? null) : internalAttempt;
+  const commitAttempt = (next: PaymentAttempt | null) => {
+    if (onPaymentAttemptChange) onPaymentAttemptChange(next);
+    else setInternalAttempt(next);
+  };
 
   // Sync state with active bill discount during render before paint
   // to prevent flashing stale values.
@@ -388,21 +409,29 @@ export default function PaymentModal({ bill, initialOverridePin, onClose, onPaid
 
       // Atomic call ensures all split payment lines succeed together
       // or fail together without leaving partial payments.
-      const idempotencyKey = idempotencyKeyRef.current || createPaymentIdempotencyKey();
-      idempotencyKeyRef.current = idempotencyKey;
+      const fingerprint = buildPaymentAttemptFingerprint({
+        billId: bill.id,
+        payments: splitLines,
+        customerId: effectiveCustomerId,
+        walletAmount: walletAmt,
+      });
+      const attempt = resolvePaymentAttempt(ownedAttempt, fingerprint, createPaymentIdempotencyKey);
+      // Hand the attempt to the owner before the request leaves: if this modal
+      // unmounts mid-flight, the key and the payload it belongs to survive.
+      commitAttempt(attempt);
       const res = await api.post(
         zeroBalanceSettlement ? `/bills/${bill.id}/payment` : `/bills/${bill.id}/payments`,
         zeroBalanceSettlement
           ? { method: 'cash', amount: null, customer_id: effectiveCustomerId, override_pin: kitchenOverridePin || undefined }
           : { payments: splitLines, customer_id: effectiveCustomerId, override_pin: kitchenOverridePin || undefined },
-        { headers: { 'Idempotency-Key': idempotencyKey } },
+        { headers: { 'Idempotency-Key': attempt.key } },
       );
       const updatedBill = res.data?.bill as Bill | undefined;
       setKitchenOverrideRequired(false);
       if (!updatedBill || updatedBill.payment_status !== 'paid') {
         // This request committed a partial payment, so the next attempt is a
         // new request and must not reuse the completed request's hash.
-        if (updatedBill) idempotencyKeyRef.current = null;
+        if (updatedBill) commitAttempt(null);
         if (updatedBill && onBillUpdate) onBillUpdate(updatedBill);
         toast.error(t('paymentIncomplete', {
           amount: currencyFmt(Number(updatedBill?.balance) || 0),
@@ -419,8 +448,18 @@ export default function PaymentModal({ bill, initialOverridePin, onClose, onPaid
         toast.success(t('paymentRecorded'));
       }
       setJustPaid(true);
+      commitAttempt(null);
     } catch (error: unknown) {
       const response = (error as { response?: { data?: { code?: string; error?: string; undeliveredCount?: number; undeliveredItems?: unknown } } } | null)?.response?.data;
+      // The bill is already settled, so this attempt created no second payment.
+      // Report it as such instead of a generic failure over money already taken,
+      // and drop the attempt so no other bill can inherit the key.
+      if (response?.error === 'Bill is already paid') {
+        commitAttempt(null);
+        toast.error(t('alreadyPaid'));
+        onClose();
+        return;
+      }
       if (response?.code === 'KITCHEN_ITEMS_UNDELIVERED') {
         setKitchenOverrideRequired(true);
         setKitchenOverridePin('');

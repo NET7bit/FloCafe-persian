@@ -677,6 +677,7 @@
     "applyingDiscount": "กำลังใช้…",
     "back": "ย้อนกลับ",
     "balanceDue": "ยอดที่ต้องชำระ",
+    "alreadyPaid": "ใบแจ้งหนี้นี้ชำระแล้ว ตรวจสอบสถานะใบแจ้งหนี้ก่อนรับชำระอีกครั้ง",
     "barcodeNotFound": "ไม่พบสินค้าสำหรับบาร์โค้ด {code}",
     "billNumber": "บิล #{number}",
     "calculatingTax": "กำลังคำนวณภาษี...",

@@ -786,6 +786,7 @@
     "applyingDiscount": "Nag-aapply…",
     "back": "Bumalik",
     "balanceDue": "Natitirang Balanse",
+    "alreadyPaid": "Bayad na ang invoice na ito. Tingnan ang status ng invoice bago tumanggap muli ng bayad.",
     "barcodeNotFound": "Hindi nahanap ang barcode: {code}",
     "billNumber": "Bill #{number}",
     "calculatingTax": "Kinakalkula ang buwis...",

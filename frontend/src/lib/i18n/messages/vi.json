@@ -677,6 +677,7 @@
     "applyingDiscount": "Đang áp dụng…",
     "back": "Quay lại",
     "balanceDue": "Số tiền còn phải trả",
+    "alreadyPaid": "Hóa đơn này đã được thanh toán. Hãy kiểm tra trạng thái hóa đơn trước khi thu tiền lại.",
     "barcodeNotFound": "Không tìm thấy sản phẩm với mã vạch {code}",
     "billNumber": "Hóa đơn #{number}",
     "calculatingTax": "Đang tính thuế...",

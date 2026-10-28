@@ -786,6 +786,7 @@
     "applyingDiscount": "Menerapkan…",
     "back": "Kembali",
     "balanceDue": "Sisa Tagihan",
+    "alreadyPaid": "Faktur ini sudah dibayar. Periksa status faktur sebelum menerima pembayaran lagi.",
     "barcodeNotFound": "Tidak ditemukan produk untuk barcode {code}",
     "billNumber": "Tagihan #{number}",
     "calculatingTax": "Menghitung pajak...",

@@ -677,6 +677,7 @@
     "applyingDiscount": "लागू किया जा रहा है...",
     "back": "वापस",
     "balanceDue": "देय राशि",
+    "alreadyPaid": "यह बिल पहले ही भुगतान हो चुका है। दोबारा भुगतान लेने से पहले बिल की स्थिति जाँचें।",
     "barcodeNotFound": "बारकोड {code} के लिए कोई उत्पाद नहीं मिला",
     "billNumber": "बिल #{number}",
     "calculatingTax": "कर की गणना हो रही है...",

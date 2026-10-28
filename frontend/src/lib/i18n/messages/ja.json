@@ -786,6 +786,7 @@
     "applyingDiscount": "適用中…",
     "back": "戻る",
     "balanceDue": "支払残高",
+    "alreadyPaid": "この請求書はすでに支払われています。再度の支払いを受け取る前に請求書の状態を確認してください。",
     "barcodeNotFound": "バーコード {code} の商品が見つかりません",
     "billNumber": "請求書 #{number}",
     "calculatingTax": "税を計算中…",

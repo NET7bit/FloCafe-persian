@@ -677,6 +677,7 @@
     "applyingDiscount": "لگائی جا رہی ہے…",
     "back": "واپس",
     "balanceDue": "واجب الادا رقم",
+    "alreadyPaid": "یہ بل پہلے ہی ادا ہو چکا ہے۔ دوبارہ ادائیگی لینے سے پہلے بل کی حیثیت دیکھیں۔",
     "barcodeNotFound": "بارکوڈ {code} کے لیے کوئی پروڈکٹ نہیں ملا",
     "billNumber": "بل #{number}",
     "calculatingTax": "ٹیکس کا حساب لگایا جا رہا ہے...",

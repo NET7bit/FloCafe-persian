@@ -786,6 +786,7 @@
     "applyingDiscount": "Uygulanıyor…",
     "back": "Geri",
     "balanceDue": "Kalan Ödenecek",
+    "alreadyPaid": "Bu fatura zaten ödenmiş. Tekrar ödeme almadan önce fatura durumunu kontrol edin.",
     "barcodeNotFound": "Barkod bulunamadı: {code}",
     "billNumber": "Fiş #{number}",
     "calculatingTax": "Vergi hesaplanıyor...",

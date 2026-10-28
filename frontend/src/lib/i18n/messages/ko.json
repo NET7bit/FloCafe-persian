@@ -786,6 +786,7 @@
     "applyingDiscount": "적용 중…",
     "back": "뒤로",
     "balanceDue": "미결제 금액",
+    "alreadyPaid": "이 청구서는 이미 결제되었습니다. 다시 결제를 받기 전에 청구서 상태를 확인하세요.",
     "barcodeNotFound": "바코드 {code}에 해당하는 상품이 없습니다",
     "billNumber": "청구서 #{number}",
     "calculatingTax": "세금 계산 중...",

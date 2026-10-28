@@ -677,6 +677,7 @@
     "applyingDiscount": "Toepassen…",
     "back": "Terug",
     "balanceDue": "Openstaand bedrag",
+    "alreadyPaid": "Deze factuur is al betaald. Controleer de factuurstatus voordat u opnieuw een betaling aanneemt.",
     "barcodeNotFound": "Geen product gevonden met barcode {code}",
     "billNumber": "Bon #{number}",
     "calculatingTax": "Belasting berekenen...",

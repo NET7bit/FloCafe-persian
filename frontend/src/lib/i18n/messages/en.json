@@ -786,6 +786,7 @@
     "applyingDiscount": "Applying…",
     "back": "Back",
     "balanceDue": "Balance Due",
+    "alreadyPaid": "This bill is already paid. Check the bill status before taking payment again.",
     "barcodeNotFound": "No product found for barcode {code}",
     "billNumber": "Bill #{number}",
     "calculatingTax": "Calculating tax...",

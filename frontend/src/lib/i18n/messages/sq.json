@@ -677,6 +677,7 @@
     "applyingDiscount": "Duke zbatuar...",
     "back": "Mbrapa",
     "balanceDue": "Bilanci i mbetur",
+    "alreadyPaid": "Kjo faturë është paguar tashmë. Kontrolloni statusin e faturës përpara se të pranoni përsëri pagesë.",
     "barcodeNotFound": "Nuk u gjet asnjë produkt për barkodin {code}",
     "billNumber": "Dëftesë #{number}",
     "calculatingTax": "Duke llogaritur taksën...",

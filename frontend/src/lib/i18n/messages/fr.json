@@ -786,6 +786,7 @@
     "applyingDiscount": "Application…",
     "back": "Retour",
     "balanceDue": "Solde dû",
+    "alreadyPaid": "Cette facture est déjà payée. Vérifiez le statut de la facture avant d’encaisser un nouveau paiement.",
     "barcodeNotFound": "Aucun produit trouvé pour le code-barres {code}",
     "billNumber": "Facture n° {number}",
     "calculatingTax": "Calcul des taxes...",

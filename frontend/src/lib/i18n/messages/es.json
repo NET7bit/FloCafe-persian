@@ -786,6 +786,7 @@
     "applyingDiscount": "Aplicando…",
     "back": "Atrás",
     "balanceDue": "Saldo pendiente",
+    "alreadyPaid": "Esta factura ya está pagada. Comprueba el estado de la factura antes de cobrar de nuevo.",
     "barcodeNotFound": "No se encontró ningún producto para el código de barras {code}",
     "billNumber": "Comprobante N.º {number}",
     "calculatingTax": "Calculando impuestos...",

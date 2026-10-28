@@ -677,6 +677,7 @@
     "applyingDiscount": "套用中…",
     "back": "返回",
     "balanceDue": "應付餘額",
+    "alreadyPaid": "此帳單已付款。再次收款前請檢查帳單狀態。",
     "barcodeNotFound": "未找到條碼 {code} 對應的商品",
     "billNumber": "帳單 #{number}",
     "calculatingTax": "計算稅費中…",

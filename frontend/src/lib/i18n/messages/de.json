@@ -786,6 +786,7 @@
     "applyingDiscount": "Wird angewendet…",
     "back": "Zurück",
     "balanceDue": "Restbetrag",
+    "alreadyPaid": "Diese Rechnung ist bereits bezahlt. Prüfen Sie den Rechnungsstatus, bevor Sie erneut eine Zahlung annehmen.",
     "barcodeNotFound": "Kein Produkt für den Barcode {code} gefunden",
     "billNumber": "Rechnung #{number}",
     "calculatingTax": "Steuer wird berechnet…",

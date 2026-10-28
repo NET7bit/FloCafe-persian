@@ -786,6 +786,7 @@
     "applyingDiscount": "Applicazione…",
     "back": "Indietro",
     "balanceDue": "Saldo dovuto",
+    "alreadyPaid": "Questa fattura è già pagata. Controlla lo stato della fattura prima di incassare un nuovo pagamento.",
     "barcodeNotFound": "Nessun prodotto trovato per il codice a barre {code}",
     "billNumber": "Conto n. {number}",
     "calculatingTax": "Calcolo dell'imposta...",

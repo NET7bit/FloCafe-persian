@@ -677,6 +677,7 @@
     "applyingDiscount": "आवेदन गर्दै...",
     "back": "पछाडि",
     "balanceDue": "बाँकी रकम",
+    "alreadyPaid": "यो बिल पहिले नै तिरेको छ। फेरि भुक्तानी लिनु अघि बिलको स्थिति जाँच्नुहोस्।",
     "barcodeNotFound": "बारकोडका लागि कुनै उत्पादन फेला परेन {code}",
     "billNumber": "बिल #{number}",
     "calculatingTax": "कर गणना गर्दै...",
