@@ -1269,6 +1269,16 @@ async function main() {
           const jpyBody = thermalModule.buildZReportBody(
             (thermalModule as any).__lastSnapshotForF5 ?? {}
           ).toString('binary');
+          // The narrowSymbol for ja-JP is the fullwidth yen (U+FFE5), which
+          // the ASCII-only capability layer cannot encode. Without the
+          // authoritative currency code the fallback stayed non-ASCII and
+          // every financial line was refused, yielding a zero-byte body.
+          assert(jpyBody.length > 0,
+            `F5: JPY Z body must not be empty (got ${jpyBody.length} bytes)`);
+          assert(!jpyBody.includes('\uFFE5'),
+            `F5: JPY Z body must not contain an unencodable fullwidth yen`);
+          assert(jpyBody.includes('JPY'),
+            `F5: JPY Z body must use the ASCII JPY fallback (got ${jpyBody.slice(0, 400)})`);
           const jpySettings = (db.prepare(`SELECT key, value FROM settings`).all() as any[]);
           const savedCurrency = jpySettings.find((r: any) => r.key === 'currency')?.value;
           try {

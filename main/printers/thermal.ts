@@ -2158,6 +2158,9 @@ export function buildZReportBody(z: any, language?: string, printer?: { columns?
   const prefix = resolveCurrencyPrefix(
     getCurrencySymbol(currency, locale),
     false,
+    undefined,
+    false,
+    currency,
   );
   const trimDecimals = false;
   const centsToAmount = (cents: number): number => (Number(cents) || 0) / factor;
