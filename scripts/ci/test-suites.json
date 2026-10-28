@@ -91,6 +91,7 @@
   "test:order-numbering-settings",
   "test:integration-happy",
   "test:integration-tax",
+  "test:tax-preview-addon-parity",
   "test:integration-payments",
   "test:issue-214",
   "test:issue-214-auth",

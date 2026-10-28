@@ -2,6 +2,7 @@ import Decimal from 'decimal.js';
 import { getDatabase, getSettingValue } from '../db';
 import { getBundledCountryPack } from '../tax-packs/bundled';
 import { getCountryByCode, getCurrencyFractionDigits, getCurrencyMinorUnitFactor, resolveTenantCurrency, type TaxIdFormat } from '../countries';
+import { resolveItemAddons } from './addons';
 
 export interface TenantInfo {
   country: string;
@@ -327,7 +328,14 @@ export function normalizeChargeAmount(value: unknown, kind: ChargeTaxKind): numb
     }
     return numericAmount;
   } catch (error: any) {
-    throw Object.assign(new Error(error.message || `${kind} charge is invalid`), { statusCode: 400 });
+    // decimal.js answers malformed input with its own message ("[DecimalError]
+    // Invalid argument: abc"). That text is an implementation detail, so it is
+    // logged and the caller only ever sees the public sentence plus a stable code.
+    console.warn('[Tax] invalid charge amount rejected:', { kind, reason: error?.message });
+    throw Object.assign(new Error(`${kind} charge must be a non-negative finite amount`), {
+      statusCode: 400,
+      code: 'invalid_charge_amount',
+    });
   }
 }
 
@@ -385,9 +393,12 @@ export function calculateConfiguredChargeTaxes(
         }],
       });
     } catch (engineError: any) {
+      // A tax-configuration fault, not a client mistake. The engine's message stays
+      // in the log; the response carries a stable code instead of engine internals.
+      console.warn('[Tax] charge tax calculation failed:', { kind, reason: engineError?.message });
       throw Object.assign(
-        new Error(`Tax calculation failed for ${kind}: ${engineError.message}`),
-        { statusCode: 400 },
+        new Error(`Tax calculation failed for ${kind}`),
+        { statusCode: 400, code: 'charge_tax_failed' },
       );
     }
 
@@ -744,10 +755,38 @@ export async function calculateTaxPreview(req: any, res: any): Promise<void> {
       const itemDiscount = Number.isFinite(rawDisc) && rawDisc >= 0 ? rawDisc : 0;
 
       let subtotal = unitPrice * quantity;
-      if (itemData.addons) {
-        for (const addon of itemData.addons) {
-          subtotal += (addon.price || 0) * (addon.quantity || 1) * quantity;
-        }
+      // Add-ons are priced from the catalog, never from the request: the preview must
+      // answer the same number the order endpoint will store. A client that sends no
+      // add-on id cannot be priced authoritatively, so it is rejected instead of being
+      // trusted (an id-less add-on used to be priced at whatever `price` it carried).
+      // This runs for every line, including one with no add-ons at all: the required-group
+      // check lives inside the resolver, so skipping it here let a preview price a basket
+      // that the order endpoint then rejected.
+      const addonInputs = Array.isArray(itemData.addons) ? itemData.addons : [];
+      const hasIdlessAddon = addonInputs.some(
+        (addon: any) => addon && (typeof addon.id !== 'string' || addon.id.length === 0),
+      );
+      if (hasIdlessAddon) {
+        res.status(400).json({
+          error: 'Each add-on must reference a valid catalog add-on ID',
+          code: 'addon_id_required',
+        });
+        return;
+      }
+      let resolvedAddons: ReturnType<typeof resolveItemAddons>;
+      try {
+        resolvedAddons = resolveItemAddons(db, product.id, addonInputs);
+      } catch (addonError: any) {
+        // The resolver's message names catalog entries; log it, answer generically.
+        console.warn('[TaxPreview] add-on resolution failed:', addonError?.message);
+        res.status(400).json({
+          error: 'One or more add-ons are not available for this product',
+          code: 'addon_invalid',
+        });
+        return;
+      }
+      for (const addon of resolvedAddons) {
+        subtotal += addon.price * addon.quantity * quantity;
       }
       subtotal = Math.max(0, subtotal - itemDiscount);
 
@@ -865,6 +904,11 @@ export async function calculateTaxPreview(req: any, res: any): Promise<void> {
     });
   } catch (error: any) {
     console.error('[Tax] Preview error:', error);
-    res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : "Internal server error" });
+    // `error` stays a string for every existing consumer; `code` is added only when
+    // the thrown error carries one, so unrelated failures keep their exact shape.
+    res.status(error.statusCode || 500).json({
+      error: error.statusCode ? error.message : "Internal server error",
+      ...(typeof error.code === 'string' && error.code ? { code: error.code } : {}),
+    });
   }
 }

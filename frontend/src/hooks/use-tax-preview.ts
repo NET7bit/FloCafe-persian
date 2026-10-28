@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '@/lib/api';
 import type { CartItem } from '@/lib/types';
 
@@ -42,11 +42,19 @@ export function useTaxPreview(
   customerId: number | string | null,
   packagingCharge?: number,
   discount?: TaxPreviewDiscount | null,
-): { tax: TaxPreview | null; loading: boolean; error: string | null } {
+): { tax: TaxPreview | null; loading: boolean; error: string | null; retry: () => void } {
   const isEmpty = !items || items.length === 0;
   const [tax, setTax] = useState<TaxPreview | null>(null);
   const [loading, setLoading] = useState(!isEmpty);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by `retry` so the effect re-issues the same preview request without
+  // the caller having to mutate the cart.
+  const [reloadToken, setReloadToken] = useState(0);
+  const retry = useCallback(() => {
+    setError(null);
+    setLoading(true);
+    setReloadToken((token) => token + 1);
+  }, []);
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -111,7 +119,9 @@ export function useTaxPreview(
           items: items.map((item) => ({
             product_id: item.product.id,
             quantity: item.quantity,
-            addons: item.addons.map((a) => ({ price: Number(a.price), quantity: Number(a.quantity) || 1 })),
+            // The catalog id is the only thing the preview may use to price an add-on.
+            // Sending `price` here was what let a preview disagree with the stored order.
+            addons: item.addons.map((a) => ({ id: a.id, quantity: Number(a.quantity) || 1 })),
             discount_amount: 0,
           })),
           customer_id: customerId || null,
@@ -145,7 +155,7 @@ export function useTaxPreview(
       }
       controller.abort();
     };
-  }, [items, customerId, packagingCharge, discount?.type, discount?.value, isEmpty]);
+  }, [items, customerId, packagingCharge, discount?.type, discount?.value, isEmpty, reloadToken]);
 
-  return { tax, loading, error };
+  return { tax, loading, error, retry };
 }

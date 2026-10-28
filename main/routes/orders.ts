@@ -13,6 +13,7 @@ import {
 } from '../services/tax';
 import { applyPayableRounding } from '../services/tax-engine';
 import { calculateOrderTotals, recomputeOrderTotals } from '../services/orders';
+import { resolveItemAddons } from '../services/addons';
 import { adjustProductStock, resolveInventoryDeduction } from '../services/inventory';
 import { recordOrderCancelCogsAccounting } from '../services/accounting-cogs-adapter';
 import { applyRecipeSnapshot, buildRecipeSnapshot, parseRecipeSnapshot } from '../services/recipes';
@@ -83,6 +84,20 @@ function getStoredOrderReplay(
   }
 }
 
+/**
+ * Error codes this endpoint is allowed to publish. Everything else an internal
+ * exception carries stays out of the response: an allow-list cannot drift into
+ * leaking whatever code a library or a later refactor happens to attach.
+ */
+const PUBLIC_ORDER_ERROR_CODES = new Set(['invalid_charge_amount', 'charge_tax_failed']);
+
+function publicOrderErrorCode(error: unknown): string | null {
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? (error as { code?: unknown }).code
+    : null;
+  return typeof code === 'string' && PUBLIC_ORDER_ERROR_CODES.has(code) ? code : null;
+}
+
 // Rate limiting for PIN validation (simple in-memory)
 const pinAttempts = new Map<string, { count: number; resetAt: number }>();
 const PIN_MAX_ATTEMPTS = 5;
@@ -128,87 +143,8 @@ function syncCustomerTagCounts(db: any, customerId: string, items: { product_id:
     .run(JSON.stringify(counts), now(), customerId);
 }
 
-/** Resolves and validates item add-ons against catalog to enforce authoritative pricing. */
-function resolveItemAddons(
-  db: ReturnType<typeof getDatabase>,
-  productId: string,
-  addons: any[] | null | undefined,
-): { id: string; name: string; price: number; quantity: number }[] {
-  const addonInputs = Array.isArray(addons) ? addons : [];
-
-  const product = db.prepare('SELECT category_id FROM products WHERE id = ?').get(productId) as { category_id: string | null } | undefined;
-  const productGroupIds = (db.prepare('SELECT addon_group_id FROM addon_group_product WHERE product_id = ?').all(productId) as { addon_group_id: string }[])
-    .map((row) => row.addon_group_id);
-  const categoryGroupIds = product?.category_id
-    ? (db.prepare('SELECT addon_group_id FROM category_addon_groups WHERE category_id = ?').all(product.category_id) as { addon_group_id: string }[])
-      .map((row) => row.addon_group_id)
-    : [];
-  const linkedGroupIds = new Set([...productGroupIds, ...categoryGroupIds]);
-
-  const resolved: { id: string; name: string; price: number; quantity: number }[] = [];
-  const groupSelections = new Map<string, { totalQty: number; hasMultiQty: boolean }>();
-
-  for (const addon of addonInputs) {
-    if (!addon) continue;
-    if (!addon.id || typeof addon.id !== 'string') {
-      throw new Error('Each add-on must reference a valid catalog add-on ID');
-    }
-    const catalog = db.prepare(`
-      SELECT addons.*, addon_groups.is_active AS addon_group_is_active
-      FROM addons LEFT JOIN addon_groups ON addon_groups.id = addons.addon_group_id
-      WHERE addons.id = ?
-    `).get(addon.id) as
-      | { id: string; addon_group_id: string | null; name: string; price: number; is_active: number; addon_group_is_active: number | null }
-      | undefined;
-    if (!catalog) {
-      throw new Error(`Add-on "${addon.id}" was not found`);
-    }
-    if (catalog.is_active !== 1 || (catalog.addon_group_id !== null && catalog.addon_group_is_active !== 1)) {
-      throw new Error(`Add-on "${catalog.name}" is not available`);
-    }
-    const addonGroupId = catalog.addon_group_id;
-    if (!addonGroupId || !linkedGroupIds.has(addonGroupId)) {
-      throw new Error(`Add-on "${catalog.name}" is not available for this product`);
-    }
-
-    const quantity = addon.quantity ?? 1;
-    if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity <= 0) {
-      throw new Error(`Invalid add-on quantity for "${catalog.name}": must be a positive integer`);
-    }
-
-    resolved.push({ id: catalog.id, name: catalog.name, price: Number(catalog.price) || 0, quantity });
-
-    const qty = Math.max(1, Math.floor(quantity));
-    const current = groupSelections.get(addonGroupId) || { totalQty: 0, hasMultiQty: false };
-    groupSelections.set(addonGroupId, {
-      totalQty: current.totalQty + qty,
-      hasMultiQty: current.hasMultiQty || qty > 1,
-    });
-  }
-
-  // Validate every group linked to the product, not just ones with a selection —
-  // otherwise a required group (e.g. Size) can be silently skipped by omitting `addons`.
-  for (const groupId of linkedGroupIds) {
-    const group = db.prepare('SELECT * FROM addon_groups WHERE id = ? AND is_active = 1').get(groupId) as any;
-    if (!group) continue;
-    const selection = groupSelections.get(groupId) || { totalQty: 0, hasMultiQty: false };
-
-    if (!group.allow_multiple_quantities && selection.hasMultiQty) {
-      throw new Error(`Add-on group "${group.name}" does not allow multiple quantities`);
-    }
-
-    if (group.max_selection !== null && group.max_selection !== undefined && selection.totalQty > group.max_selection) {
-      throw new Error(`Total add-on quantity for group "${group.name}" exceeds maximum allowed (${group.max_selection})`);
-    }
-
-    const requiredMin = group.is_required ? Math.max(1, group.min_selection || 1) : (group.min_selection || 0);
-    if (requiredMin > 0 && selection.totalQty < requiredMin) {
-      throw new Error(`Selection for group "${group.name}" requires at least ${requiredMin} item(s)`);
-    }
-  }
-
-  return resolved;
-}
+// Add-on pricing and validation live in services/addons so the order endpoint and
+// the tax preview resolve against one catalog source instead of two implementations.
 
 router.get('/', orderReadRateLimit, requirePermission('orders.read'), (req: Request, res: Response) => {
   try {
@@ -500,7 +436,8 @@ router.post('/', orderWriteRateLimit, requirePermission('orders.create'), (req: 
         ? error.statusCode
         : 400;
       const message = error instanceof Error ? error.message : 'Invalid charge amount';
-      return res.status(statusCode).json({ error: message });
+      const code = publicOrderErrorCode(error);
+      return res.status(statusCode).json(code ? { error: message, code } : { error: message });
     }
 
     if (online_platform !== undefined && online_platform !== null && typeof online_platform !== 'string') {
@@ -765,7 +702,11 @@ router.post('/', orderWriteRateLimit, requirePermission('orders.create'), (req: 
       error.message === 'Insufficient stock' ? 'inventory_validation' : 'order_insert',
       error,
     );
-    res.status(statusCode).json({ error: error.statusCode ? error.message : "Internal server error" });
+    const publicCode = publicOrderErrorCode(error);
+    res.status(statusCode).json({
+      error: error.statusCode ? error.message : "Internal server error",
+      ...(publicCode ? { code: publicCode } : {}),
+    });
   }
 });
 

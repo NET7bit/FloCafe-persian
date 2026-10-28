@@ -715,13 +715,28 @@ Router: declared inline in `main/routes/index.ts`.
 
 | Method | Path | Authorization | Parameters | Response |
 | --- | --- | --- | --- | --- |
-| `POST` | `/api/tax/preview` | `pos.use`, `orders.create`, or `kitchen.use` | body: `items`, `customer_id`, `packaging_charge`, `delivery_charge`, `service_charge`, `discount_type`, `discount_value` | `400` when `items` is missing or empty. Returns the tax rollup for a hypothetical basket without persisting anything. Any one of those three permissions admits the caller, so by default every role prices a basket exactly as it did before the permission migration; the POS checkout modal calls this on every cart change. |
+| `POST` | `/api/tax/preview` | `pos.use`, `orders.create`, or `kitchen.use` | body: `items` (each: `product_id`, `quantity`, `addons[]` of `{ id, quantity }`), `customer_id`, `packaging_charge`, `delivery_charge`, `service_charge`, `discount_type`, `discount_value` | `400` when `items` is missing or empty. Add-on prices are read from the catalog, exactly as `POST /api/orders` reads them; a `price` in the request is ignored. An add-on with no catalog `id` is rejected with `code: "addon_id_required"`; one that is unknown, inactive, or not linked to the product is rejected with `code: "addon_invalid"`. Returns the tax rollup for a hypothetical basket without persisting anything. Any one of those three permissions admits the caller, so by default every role prices a basket exactly as it did before the permission migration; the POS checkout modal calls this on every cart change. |
 | `GET` | `/api/tax/categories` | `ROLE_ACCESS.ownerManager` | none | `{ pack_id, country, categories, default_category_id, configuration_ready, unclassified_category_id }`. `categories` is empty until the pack's configuration is complete. |
 | `GET` | `/api/mobile/pairing-code` | `ROLE_ACCESS.owner` | none | `{ pairing_code, expires_at, qr_data_url }`. Returns the cached code when one is live, otherwise generates one. `409` when the store is not yet claimed in FloAdmin; `502` for any other cloud failure. |
 | `POST` | `/api/mobile/rotate-code` | `ROLE_ACCESS.owner` | none | Same shape as the read, and every already paired RevFlo device is disconnected. |
 | `GET` | `/api/mobile/devices` | `ROLE_ACCESS.owner` | none | `{ devices: [ ... ] }`. `502` when FloAdmin is unreachable. |
 | `GET` | `/api/customers-search` | `ROLE_ACCESS.sales` | query: `q` | Flat array of at most 20 active customers, each with a `wallet_balance`. `q` shorter than 2 characters returns `[]`. A query with no letters is treated as phone-like and matched against stored phone digits. |
 | `GET` | `/api/crm/lookup` | `ROLE_ACCESS.sales` | query: `phone`, `country_code` | `{ found, customer }`. `400` when `phone` is missing. The number is normalized to E.164 against the tenant country before lookup. |
+
+### Error shape on `tax/preview` and order creation
+
+Both endpoints answer validation failures as `{ "error": "<sentence>", "code": "<stable_code>" }`.
+`error` stays a plain string for every existing consumer; `code` is added only for the failures
+listed here, and the order endpoint publishes nothing outside that list.
+
+| `code` | Status | Meaning |
+| --- | --- | --- |
+| `addon_id_required` | `400` | An add-on in `items[].addons[]` carries no catalog `id`. Preview cannot price it authoritatively, so it is rejected rather than priced from the request. |
+| `addon_invalid` | `400` | The add-on is unknown, inactive, or its group is not linked to the product. |
+| `invalid_charge_amount` | `400` | `packaging_charge`, `delivery_charge`, or `service_charge` is negative, non-finite, or not a number. |
+| `charge_tax_failed` | `400` | The active tax pack cannot compute tax for a configured charge category. The engine's own message is logged, not returned. |
+
+Library-level text (for example a `Decimal` parse error) never appears in a response body.
 
 ## KDS server (`:3002`)
 
