@@ -23,7 +23,19 @@ const crypto = require('crypto');
 const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'flo-diagnostics-bounds-'));
 Module._load = function (request: string, parent: unknown, isMain: boolean) {
   if (request === 'electron') {
-    return { app: { isPackaged: true, getPath: () => testDir, getVersion: () => '3.11.0' } };
+    return {
+      app: { isPackaged: true, getPath: () => testDir, getVersion: () => '3.11.0' },
+      // Identity "encryption" stand-in, same approach as tests/google-drive.test.ts:
+      // real safeStorage is not available under ELECTRON_RUN_AS_NODE. Without it
+      // `readCloudApiKey` classifies the plaintext fixture key as `legacy_blocked`,
+      // so section 3 could never fill the outbox it asserts the cap on. Kept inline
+      // because this file is a script, so a top-level const would be a global binding.
+      safeStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (s: string) => Buffer.from(s, 'utf8'),
+        decryptString: (b: Buffer) => Buffer.from(b).toString('utf8'),
+      },
+    };
   }
   return originalLoad.apply(this, arguments as any);
 };

@@ -16,7 +16,19 @@ const crypto = require('crypto');
 const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'flo-diagnostics-event-'));
 Module._load = function (request: string, parent: unknown, isMain: boolean) {
   if (request === 'electron') {
-    return { app: { isPackaged: true, getPath: () => testDir, getVersion: () => '2.9.5' } };
+    return {
+      app: { isPackaged: true, getPath: () => testDir, getVersion: () => '2.9.5' },
+      // Identity "encryption" stand-in, same approach as tests/google-drive.test.ts:
+      // real safeStorage is not available under ELECTRON_RUN_AS_NODE. Without it the
+      // cloud key reads back as `legacy_blocked`, the enqueue gate refuses every event
+      // and the outbox assertions below can never be satisfied. Kept inline because
+      // this file is a script, so a top-level const would be a global binding.
+      safeStorage: {
+        isEncryptionAvailable: () => true,
+        encryptString: (s: string) => Buffer.from(s, 'utf8'),
+        decryptString: (b: Buffer) => Buffer.from(b).toString('utf8'),
+      },
+    };
   }
   return originalLoad.apply(this, arguments as any);
 };
