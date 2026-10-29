@@ -10,6 +10,22 @@
 // ratchets instead: pre-existing errors are accepted, new ones fail, and fixing
 // errors is always free (only `current - baseline > 0` per file counts).
 //
+// Module mode (added by the D.10-H.11O diagnosis). runTypeScript passes
+// `--moduleDetection force` to tsc below. Two claims above are superseded by
+// measurement and must be read with this paragraph in mind:
+//   * "Making it green needs a repo-wide test rewrite" — not needed for the
+//     type-check layer; this one flag does it: 2217 -> 377 errors and 1398 -> 0
+//     collision diagnostics (TS6200/TS2451/TS2393), with no new errors anywhere.
+//   * "fixing errors is always free" — NOT true for a local fix. Adding `export {}`
+//     to a single anchor file un-masks its peers' collisions: the totals went to
+//     2619 errors with 514 new ones across 100 files, because TS6200 aggregates one
+//     line per conflicting peer and was hiding the per-identifier TS2451s.
+// The flag is passed HERE on purpose and is deliberately NOT written into
+// tests/tsconfig.json: that file is also handed to ts-node (`-P tests/tsconfig.json`)
+// by tests/run-electron-node-test.cjs and the per-suite npm scripts, so a tsconfig
+// change could alter the emit of ~145 import/export-free scripts, whereas this flag
+// cannot reach ts-node at all.
+//
 // Baseline ownership: scripts/ci/tests-typecheck-baseline.json, owned by this
 // gate. Format: sorted per-file error counts plus project/compiler/total
 // metadata; no timestamps or environment-specific values. Update policy: run
@@ -71,7 +87,7 @@ function runTypeScript(projectPath) {
   }
   const result = spawnSync(
     process.execPath,
-    [tscBin, '-p', projectPath, '--noEmit', '--pretty', 'false'],
+    [tscBin, '-p', projectPath, '--noEmit', '--pretty', 'false', '--moduleDetection', 'force'],
     { cwd: ROOT, encoding: 'utf8', maxBuffer: 1024 * 1024 * 128 },
   );
   if (result.error) {
