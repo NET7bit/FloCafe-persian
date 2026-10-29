@@ -2,6 +2,13 @@
  * Source-level guards for the UI regressions fixed by issues #621, #623, and #626.
  * Behavioral table update coverage lives in tables-string-ids.test.ts; these checks
  * keep the responsive layout and dark-mode utilities from being accidentally removed.
+ *
+ * The final section is different in kind: it renders the real CartPanel through
+ * react-dom/server and asserts the rendered `disabled` attribute of the
+ * place-order button under each tax-preview state (D.10-H.11I, F5). That block
+ * runs the component body, so it is a rendered guard rather than a text guard —
+ * but it runs no effects and fires no click, so it says nothing about
+ * handlePlaceOrder, POST /orders, the prepaid branch, or the table-picker path.
  */
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
@@ -55,5 +62,198 @@ assert.ok(
   numberPadIndex >= 0 && changeReturnedIndex > numberPadIndex,
   'change returned stays below the payment controls',
 );
+
+// ── F5 place-order gate, rendered (D.10-H.11I) ──────────────────────────────
+// CartPanel.tsx:453 disables the place-order button on
+// `submitting || cart.items.length === 0 || placeOrderBlocked`. These four
+// checks render the actual component and read the actual attribute, so they
+// hold the component's own logic to that contract.
+const Module = require('module');
+const frontendRequire = Module.createRequire(resolve(process.cwd(), 'frontend/package.json'));
+
+interface CartPanelHarness {
+  React: any;
+  ReactDOMServer: any;
+  IntlProvider: any;
+  CartPanel: any;
+  useCartStore: any;
+  useAuthStore: any;
+  messages: any;
+}
+
+function loadCartPanelHarness(): CartPanelHarness {
+  const originalResolveFilename = Module._resolveFilename;
+  // The frontend resolves tsconfig path aliases; mirror them exactly, and only
+  // while the module graph below is loading. Same pattern as
+  // rtl-dashboard-pos-common.test.ts.
+  Module._resolveFilename = function (request: string, parent: any, isMain: boolean, options?: any) {
+    let aliased = request;
+    if (request.startsWith('@/')) aliased = resolve(process.cwd(), 'frontend/src', request.slice(2));
+    else if (request.startsWith('@print/')) aliased = resolve(process.cwd(), 'shared/print', request.slice('@print/'.length));
+    else if (request.startsWith('@shared/')) aliased = resolve(process.cwd(), 'shared', request.slice('@shared/'.length));
+    else if (request === '@countries') aliased = resolve(process.cwd(), 'main/countries.ts');
+    return originalResolveFilename.call(this, aliased, parent, isMain, options);
+  };
+  try {
+    return {
+      React: frontendRequire('react'),
+      ReactDOMServer: frontendRequire('react-dom/server'),
+      IntlProvider: frontendRequire('use-intl').IntlProvider,
+      CartPanel: require('../frontend/src/components/pos/CartPanel').default,
+      useCartStore: require('../frontend/src/store/cart').useCartStore,
+      useAuthStore: require('../frontend/src/store/auth').useAuthStore,
+      messages: require('../frontend/src/lib/i18n/messages/en.json'),
+    };
+  } finally {
+    Module._resolveFilename = originalResolveFilename;
+  }
+}
+
+const {
+  React, ReactDOMServer, IntlProvider, CartPanel, useCartStore, useAuthStore, messages,
+} = loadCartPanelHarness();
+
+// zustand reads its store through useSyncExternalStore, and a server render uses
+// that hook's *server* snapshot — the state captured when the store was created,
+// not the state this test seeds. Substituting getSnapshot (the same override
+// rtl-dashboard-pos-common.test.ts uses, restored in the finally below) lets the
+// seeded cart reach the render. Without it the cart would always render empty and
+// the button would be disabled for the wrong reason.
+const originalUseSyncExternalStore = React.useSyncExternalStore;
+React.useSyncExternalStore = (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot();
+
+const SEEDED_CART_LINE = 'F5 Guard Espresso';
+const placeOrderLabel: string = messages.pos.placeOrderButton;
+
+/** The opening tag of the <button> whose content carries `label`. */
+function placeOrderButtonTag(markup: string, label: string): string {
+  const at = markup.indexOf(label);
+  assert.ok(at >= 0, `place-order label ${JSON.stringify(label)} is missing from the rendered markup`);
+  const open = markup.lastIndexOf('<button', at);
+  assert.ok(open >= 0, `place-order label ${JSON.stringify(label)} does not sit inside a <button>`);
+  const close = markup.indexOf('>', open);
+  assert.ok(close > open, 'rendered markup contains a malformed <button>');
+  return markup.slice(open, close + 1);
+}
+
+/**
+ * True only for the real `disabled` attribute. The Button's own Tailwind classes
+ * contain the word (`disabled:pointer-events-none`), so a substring check would
+ * call every button disabled — the lookahead rejects that form.
+ */
+function hasDisabledAttribute(tag: string): boolean {
+  return /(?:^|\s)disabled(?==|\s|\/?>)/.test(tag);
+}
+
+const validPreview = {
+  subtotal: 5.4,
+  discount_amount: 0,
+  discounted_subtotal: 5.4,
+  tax_amount: 0.54,
+  tax_breakdown: [{ title: 'VAT', rate: 10, amount: 0.54 }],
+  packaging_charge: 0,
+  delivery_charge: 0,
+  service_charge: 0,
+  round_off: 0,
+  total: 5.94,
+};
+
+const cartItemsBefore = useCartStore.getState().items;
+const tenantBefore = useAuthStore.getState().currentTenant;
+
+try {
+  // A non-empty cart with submitting:false, so a disabled button can only come
+  // from placeOrderBlocked — an empty cart or an in-flight submit would disable
+  // it independently and make every assertion below pass for the wrong reason.
+  useCartStore.setState({
+    items: [{
+      id: 'f5-guard-line',
+      product: { id: 9001, name: SEEDED_CART_LINE, price: 5.4 },
+      quantity: 1,
+      addons: [],
+      special_instructions: '',
+    }],
+    orderType: 'takeaway',
+    tableId: null,
+    orderNotes: '',
+  });
+  useAuthStore.setState({
+    currentTenant: {
+      country: 'US',
+      currency: 'USD',
+      business_type: 'restaurant',
+      currency_display: 'symbol',
+      number_digits: 2,
+    },
+  });
+
+  const renderCartPanel = (props: Record<string, unknown>): string => ReactDOMServer.renderToStaticMarkup(
+    React.createElement(
+      IntlProvider,
+      { locale: 'en', messages },
+      React.createElement(CartPanel, {
+        tables: [],
+        currency: 'USD',
+        submitting: false,
+        onPlaceOrder: () => undefined,
+        onShowTablePicker: () => undefined,
+        ...props,
+      }),
+    ),
+  );
+
+  // T5 — the screen reports a preview still loading.
+  const loadingMarkup = renderCartPanel({
+    placeOrderBlocked: true, taxPreviewLoading: true, taxPreviewError: null, taxPreview: null,
+  });
+  assert.ok(
+    loadingMarkup.includes(SEEDED_CART_LINE),
+    'T5 precondition: the seeded cart line must reach the render, otherwise the button is disabled for being empty',
+  );
+  assert.ok(
+    hasDisabledAttribute(placeOrderButtonTag(loadingMarkup, placeOrderLabel)),
+    'T5: a place-order button under a loading preview must render disabled',
+  );
+
+  // T6 — the screen reports a failed preview. CartPanel receives only the final
+  // prop, so this pins the blocked rendering; it does not prove that
+  // useTaxPreview produced the error.
+  const errorMarkup = renderCartPanel({
+    placeOrderBlocked: true, taxPreviewLoading: false, taxPreviewError: 'preview failed', taxPreview: null,
+  });
+  assert.ok(
+    hasDisabledAttribute(placeOrderButtonTag(errorMarkup, placeOrderLabel)),
+    'T6: a place-order button under a failed preview must render disabled',
+  );
+
+  // T7 — no preview at all, with loading and error both clear.
+  const emptyPreviewMarkup = renderCartPanel({
+    placeOrderBlocked: true, taxPreviewLoading: false, taxPreviewError: null, taxPreview: null,
+  });
+  assert.ok(
+    hasDisabledAttribute(placeOrderButtonTag(emptyPreviewMarkup, placeOrderLabel)),
+    'T7: a place-order button with no preview must render disabled',
+  );
+
+  // T8 — the control. Same cart, same everything, only placeOrderBlocked flips,
+  // so the difference between this and T5 is the gate and nothing else.
+  const unblockedMarkup = renderCartPanel({
+    placeOrderBlocked: false, taxPreviewLoading: false, taxPreviewError: null, taxPreview: validPreview,
+  });
+  assert.ok(
+    unblockedMarkup.includes(SEEDED_CART_LINE),
+    'T8 precondition: the seeded cart line must reach the render',
+  );
+  assert.ok(
+    !hasDisabledAttribute(placeOrderButtonTag(unblockedMarkup, placeOrderLabel)),
+    'T8: a place-order button with a valid preview must not be disabled by the F5 gate',
+  );
+} finally {
+  useCartStore.setState({ items: cartItemsBefore });
+  useAuthStore.setState({ currentTenant: tenantBefore });
+  React.useSyncExternalStore = originalUseSyncExternalStore;
+}
+
+console.log('  ✓ CartPanel renders the place-order button disabled exactly when the tax preview is blocked (F5)');
 
 console.log('✓ UI regression guards for issues #621, #623, #625, and #626 passed');

@@ -881,7 +881,8 @@
     "customerRequiredForAccount": "Chọn khách hàng để ghi vào tài khoản khách hàng",
     "neesieChecksTitle": "Ghi vào tài khoản khách hàng",
     "neesieChecksHint": "Chạm vào khách để chuyển hóa đơn của họ sang tài khoản khách hàng của đơn — mọi hóa đơn ghi nợ đều tính vào một khách; phần còn lại thu tiền như bình thường.",
-    "neesieChecksCount": "{count, plural, other {# hóa đơn sẽ tính vào khách hàng của đơn}}"
+    "neesieChecksCount": "{count, plural, other {# hóa đơn sẽ tính vào khách hàng của đơn}}",
+    "taxPreviewRequired": "Bản xem trước số tiền chưa sẵn sàng. Hãy đợi tính xong tổng cộng rồi đặt lại đơn hàng."
   },
   "printTest": {
     "amt": "Số tiền",

@@ -990,7 +990,8 @@
     "kitchenItemsPendingWarning": "{count, plural, one {Masih ada # item yang disiapkan di dapur} other {Masih ada # item yang disiapkan di dapur}}",
     "kitchenDeliveryOverridePrompt": "Item dapur belum diantar. Masukkan PIN manajer untuk mengizinkan penagihan.",
     "kitchenDeliveryOverrideSuccess": "Persetujuan manajer untuk item yang belum diantar diterima.",
-    "kitchenDeliveryOverrideInvalid": "PIN manajer tidak valid. Silakan coba lagi."
+    "kitchenDeliveryOverrideInvalid": "PIN manajer tidak valid. Silakan coba lagi.",
+    "taxPreviewRequired": "Pratinjau jumlah belum siap. Tunggu hingga total selesai dihitung, lalu buat pesanan lagi."
   },
   "printTest": {
     "amt": "Jml",

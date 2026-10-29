@@ -4,7 +4,7 @@ import { useState } from 'react';
 import {
   ShoppingCart, UtensilsCrossed, Package, Truck, Globe,
   Plus, Minus, Trash2, Pause, MapPin, SquarePen,
-  Users,
+  Users, Loader2, RotateCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useCartStore } from '@/store/cart';
@@ -15,6 +15,7 @@ import { useTranslations } from 'use-intl';
 import toast from 'react-hot-toast';
 import type { Table, Order, OrderItem, CartItem } from '@/lib/types';
 import { useFormatCurrency } from '@/hooks/useFormatCurrency';
+import type { TaxPreview } from '@/hooks/use-tax-preview';
 import { fractionalQuantityStep, roundToQuantityPrecision } from '@/lib/utils';
 
 interface Props {
@@ -26,6 +27,13 @@ interface Props {
   onEditItem?: (item: CartItem) => void;
   variant?: 'sidebar' | 'drawer';
   existingOrder?: Order | null;
+  /** Server-authoritative preview of the money breakdown; null until it lands. */
+  taxPreview?: TaxPreview | null;
+  taxPreviewLoading?: boolean;
+  taxPreviewError?: string | null;
+  onRetryTaxPreview?: () => void;
+  /** Set by the screen that owns the preview; disables placing while it is unusable. */
+  placeOrderBlocked?: boolean;
 }
 
 const orderTypeIcons = {
@@ -129,13 +137,18 @@ function ItemQuantityControl({
   );
 }
 
-export default function CartPanel({ tables, submitting, onPlaceOrder, onEditItem, variant = 'sidebar', existingOrder }: Props) {
+export default function CartPanel({
+  tables, submitting, onPlaceOrder, onEditItem, variant = 'sidebar', existingOrder,
+  taxPreview = null, taxPreviewLoading = false, taxPreviewError = null, onRetryTaxPreview,
+  placeOrderBlocked = false,
+}: Props) {
   const cart = useCartStore();
   const heldOrders = useHeldOrdersStore();
   const { currentTenant } = useAuthStore();
   const billingType = usePosSettingsStore((s) => s.billingType);
   const t = useTranslations('pos');
   const tCommon = useTranslations('common');
+  const tReceipt = useTranslations('receipt');
   const isRestaurant = (currentTenant?.business_type ?? 'restaurant') === 'restaurant';
   const fmt = useFormatCurrency();
   const canHold = isRestaurant && cart.orderType === 'dine_in' && cart.tableId && cart.items.length > 0 && billingType === 'postpaid';
@@ -164,7 +177,7 @@ export default function CartPanel({ tables, submitting, onPlaceOrder, onEditItem
   return (
     <div className={
       isDrawer
-        ? 'flex flex-col w-full'
+        ? 'flex min-h-0 w-full flex-1 flex-col'
         : 'w-full h-full bg-card rounded-xl border border-border dark:border-border flex flex-col shadow-sm'
     }>
       {/* Order Type */}
@@ -243,7 +256,7 @@ export default function CartPanel({ tables, submitting, onPlaceOrder, onEditItem
       </div>
 
       {/* Cart Items */}
-      <div className={isDrawer ? 'overflow-y-auto p-4 max-h-[40vh]' : 'flex-1 overflow-y-auto p-4'}>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {/* Previously ordered items (add-items mode) */}
         {existingOrder && existingOrder.items && existingOrder.items.filter((i: OrderItem) => i.status !== 'cancelled').length > 0 && (
           <div className="mb-3 pb-3 border-b border-dashed border-border">
@@ -317,8 +330,9 @@ export default function CartPanel({ tables, submitting, onPlaceOrder, onEditItem
         )}
       </div>
 
-      {/* Cart Footer */}
-      <div className="p-4 border-t border-border dark:border-border">
+      {/* Cart Footer — shrink-0 so the money and the place-order action can
+          never be pushed out of the panel by a long item list. */}
+      <div className="shrink-0 p-4 border-t border-border dark:border-border">
         {/* Order Notes */}
         {cart.items.length > 0 && (
           <div className="mb-3">
@@ -337,12 +351,97 @@ export default function CartPanel({ tables, submitting, onPlaceOrder, onEditItem
           <span className="text-muted-foreground">{t('items')}</span>
           <span className="font-medium">{cart.itemCount()}</span>
         </div>
-        <div className="flex justify-between mb-4 text-lg">
-          <span className="font-semibold text-foreground">{t('subtotal')}</span>
-          <span className="font-bold text-brand">
-            {fmt(cart.subtotal())}
-          </span>
+        <div className="flex justify-between text-sm">
+          <span className="text-muted-foreground">{tCommon('subtotal')}</span>
+          <span className="font-medium tabular-nums">{fmt(cart.subtotal())}</span>
         </div>
+
+        {/* Everything below comes from POST /api/tax/preview. The cart never
+            computes tax, discount or the payable total locally. */}
+        {taxPreviewLoading && (
+          <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
+            <Loader2 size={12} className="animate-spin" />
+            {t('calculatingTax')}
+          </p>
+        )}
+
+        {!taxPreviewLoading && taxPreviewError && (
+          <div
+            className="mt-1.5 flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-2 py-1.5"
+            role="alert"
+          >
+            <span className="text-xs text-destructive">{tCommon('somethingWrong')}</span>
+            {onRetryTaxPreview && (
+              <button
+                type="button"
+                onClick={onRetryTaxPreview}
+                className="touch-target inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 text-xs font-medium text-destructive underline"
+              >
+                <RotateCw size={11} />
+                {tCommon('continue')}
+              </button>
+            )}
+          </div>
+        )}
+
+        {!taxPreviewLoading && !taxPreviewError && taxPreview && (
+          <div className="mt-1.5 space-y-0.5">
+            {taxPreview.discount_amount > 0 && (
+              <div className="flex justify-between text-xs text-emerald-700 dark:text-emerald-400">
+                <span>{tCommon('discount')}</span>
+                <span className="tabular-nums">&minus; {fmt(taxPreview.discount_amount)}</span>
+              </div>
+            )}
+            {(taxPreview.tax_breakdown ?? []).map((component) => (
+              <div
+                key={`${component.title}-${component.rate}`}
+                className="flex justify-between text-xs text-muted-foreground"
+              >
+                <span>{t('taxLine', { title: component.title, rate: component.rate })}</span>
+                <span className="tabular-nums">{fmt(component.amount)}</span>
+              </div>
+            ))}
+            {taxPreview.service_charge > 0 && (
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>{tReceipt('serviceCharge')}</span>
+                <span className="tabular-nums">{fmt(taxPreview.service_charge)}</span>
+              </div>
+            )}
+            {taxPreview.packaging_charge > 0 && (
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>{t('packaging')}</span>
+                <span className="tabular-nums">{fmt(taxPreview.packaging_charge)}</span>
+              </div>
+            )}
+            {taxPreview.delivery_charge > 0 && (
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>{t('delivery')}</span>
+                <span className="tabular-nums">{fmt(taxPreview.delivery_charge)}</span>
+              </div>
+            )}
+            {taxPreview.round_off !== 0 && (
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>{t('roundOff')}</span>
+                <span className="tabular-nums">{fmt(taxPreview.round_off)}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* The payable amount is pinned here and never scrolls with the items.
+            While the preview is missing or failed it renders as an em dash so a
+            stale or invented figure is never shown as the amount to collect. */}
+        <div className="mt-2 flex items-baseline justify-between border-t border-dashed border-border pt-2">
+          <span className="text-sm font-semibold text-foreground">{t('totalDue')}</span>
+          {taxPreviewLoading || taxPreviewError || !taxPreview ? (
+            <span className="text-sm font-semibold text-muted-foreground" aria-label={t('calculatingTax')}>
+              &mdash;
+            </span>
+          ) : (
+            <span className="text-2xl font-bold tabular-nums text-brand">{fmt(taxPreview.total)}</span>
+          )}
+        </div>
+        <div className="mb-3" />
         <div className="flex gap-2">
           {canHold && (
             <Button variant="outline" onClick={handleHold} className="flex-1">
@@ -351,7 +450,7 @@ export default function CartPanel({ tables, submitting, onPlaceOrder, onEditItem
           )}
           <Button
             onClick={onPlaceOrder}
-            disabled={submitting || cart.items.length === 0}
+            disabled={submitting || cart.items.length === 0 || placeOrderBlocked}
             className="flex-1"
             size="lg"
           >

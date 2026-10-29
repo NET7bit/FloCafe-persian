@@ -881,7 +881,8 @@
     "customerRequiredForAccount": "Kies een klant om op de klantrekening te boeken",
     "neesieChecksTitle": "Op klantrekening boeken",
     "neesieChecksHint": "Tik gasten aan om hun rekeningen naar de klantrekening van de bestelling te verplaatsen — elke open rekening wordt op die ene klant geboekt; de rest betaal je als gewoonlijk.",
-    "neesieChecksCount": "{count, plural, other {# rekeningen worden op de klant van de bestelling geboekt}}"
+    "neesieChecksCount": "{count, plural, other {# rekeningen worden op de klant van de bestelling geboekt}}",
+    "taxPreviewRequired": "De bedragvoorbeeld is nog niet gereed. Wacht tot het totaal is berekend en plaats de bestelling daarna opnieuw."
   },
   "printTest": {
     "amt": "Bedrag",

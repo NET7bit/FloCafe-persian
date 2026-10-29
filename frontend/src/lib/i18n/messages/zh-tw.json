@@ -881,7 +881,8 @@
     "customerRequiredForAccount": "請選擇客戶以記入客戶帳戶",
     "neesieChecksTitle": "記入客戶帳戶",
     "neesieChecksHint": "點選客人即可將其帳單移至訂單的客戶帳戶——所有賒帳帳單都會記到同一位客戶；其餘款項照常收取。",
-    "neesieChecksCount": "{count, plural, other {# 張帳單將記到訂單的客戶}}"
+    "neesieChecksCount": "{count, plural, other {# 張帳單將記到訂單的客戶}}",
+    "taxPreviewRequired": "金額預覽尚未就緒。請等待總額計算完成後，再重新送出訂單。"
   },
   "printTest": {
     "amt": "金額",

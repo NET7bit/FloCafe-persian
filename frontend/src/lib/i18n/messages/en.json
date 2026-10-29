@@ -990,7 +990,8 @@
     "kitchenItemsPendingWarning": "{count, plural, one {# item still being prepared in the kitchen} other {# items still being prepared in the kitchen}}",
     "kitchenDeliveryOverridePrompt": "Kitchen items are not yet delivered. Enter Manager PIN to authorize billing.",
     "kitchenDeliveryOverrideSuccess": "Manager override accepted for undelivered items.",
-    "kitchenDeliveryOverrideInvalid": "Invalid Manager PIN. Please try again."
+    "kitchenDeliveryOverrideInvalid": "Invalid Manager PIN. Please try again.",
+    "taxPreviewRequired": "The amount preview isn't ready yet. Wait for the total to calculate, then place the order again."
   },
   "printTest": {
     "amt": "Amt",

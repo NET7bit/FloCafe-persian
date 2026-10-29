@@ -11,8 +11,11 @@ import { usePrinterStatusSync } from '@/hooks/usePrinter';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isPos = pathname === '/pos' || pathname === '/kds';
-  const isSettings = pathname === '/settings';
+  // The desktop build sets `trailingSlash: true`, so usePathname() can return
+  // "/pos/" — compare the normalised path so both forms take the same branch.
+  const route = pathname.replace(/\/+$/, '') || '/';
+  const isPos = route === '/pos' || route === '/kds';
+  const isSettings = route === '/settings';
   // Sync printer status early so hardware and WebUSB reconnect before first print.
   usePrinterStatusSync();
 

@@ -48,12 +48,11 @@ interface Props {
   setSearch: (s: string) => void;
   currency: string;
   onProductClick: (product: Product) => void;
-  sidebarOpen?: boolean;
 }
 
 export default function ProductGrid({
   categories, products, selectedCategory, setSelectedCategory,
-  search, setSearch, onProductClick, sidebarOpen = true,
+  search, setSearch, onProductClick,
 }: Props) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const cart = useCartStore();
@@ -141,12 +140,12 @@ export default function ProductGrid({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto pb-20 md:pb-0">
-        <div className={`grid gap-3 ${
-          sidebarOpen 
-            ? 'grid-cols-4' 
-            : 'grid-cols-5'
-        }`}>
+      <div className="flex-1 overflow-y-auto pb-20 lg:pb-0">
+        {/* 132px is derived, not arbitrary: the narrowest supported grid area is
+            1024px window - 380px (max sidebar) - 64px padding - 16px gap - 288px
+            cart = 276px, and two columns there need (276 - 12) / 2 = 132px each.
+            From xl up the original 140px design minimum is kept. */}
+        <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(132px,1fr))] xl:grid-cols-[repeat(auto-fill,minmax(140px,1fr))]">
           {filtered.map((product) => {
             const inCartQty = cartQuantities.get(product.id) || 0;
             
@@ -211,11 +210,18 @@ export default function ProductGrid({
                 )}
 
                 <h3 className="font-medium text-foreground text-sm line-clamp-2 leading-snug">{product.name}</h3>
-                <div className="flex items-center justify-between mt-1">
-                  <p className="text-brand font-bold">
+                {/* Price row. It wraps instead of shrinking the price: when the
+                    tile is too narrow for the amount plus the indicator icons,
+                    the icons drop to their own line (ms-auto keeps them at the
+                    inline end) so the amount keeps the full card width. The
+                    card is overflow-hidden, so `overflow-wrap:anywhere` is the
+                    last resort that makes a long amount wrap rather than lose
+                    digits — truncation is never used on money. */}
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-x-1 gap-y-0.5">
+                  <p className="min-w-0 max-w-full text-start text-[13px] text-brand font-bold leading-tight tabular-nums [overflow-wrap:anywhere]">
                     {fmt(Number(product.price))}
                   </p>
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="ms-auto flex shrink-0 items-center gap-1">
                     {!showProductImages && product.tags && product.tags.length > 0 && (
                       <TagBadge tag={product.tags[0]} />
                     )}

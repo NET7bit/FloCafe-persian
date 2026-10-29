@@ -990,7 +990,8 @@
     "kitchenItemsPendingWarning": "{count, plural, one {Mutfakta hâlâ hazırlanan # ürün var} other {Mutfakta hâlâ hazırlanan # ürün var}}",
     "kitchenDeliveryOverridePrompt": "Mutfak ürünleri henüz teslim edilmedi. Ödemeye izin vermek için yönetici PIN kodunu girin.",
     "kitchenDeliveryOverrideSuccess": "Teslim edilmemiş ürünler için yönetici onayı kabul edildi.",
-    "kitchenDeliveryOverrideInvalid": "Yönetici PIN kodu geçersiz. Tekrar deneyin."
+    "kitchenDeliveryOverrideInvalid": "Yönetici PIN kodu geçersiz. Tekrar deneyin.",
+    "taxPreviewRequired": "Tutar önizlemesi henüz hazır değil. Toplam hesaplanana kadar bekleyin, ardından siparişi yeniden oluşturun."
   },
   "printTest": {
     "amt": "Tutar",

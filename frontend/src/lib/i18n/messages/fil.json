@@ -990,7 +990,8 @@
     "kitchenItemsPendingWarning": "{count, plural, one {# item pa ang inihahanda sa kusina} other {# item pa ang inihahanda sa kusina}}",
     "kitchenDeliveryOverridePrompt": "Hindi pa naihahatid ang mga item mula sa kusina. Ilagay ang PIN ng manager para pahintulutan ang paniningil.",
     "kitchenDeliveryOverrideSuccess": "Tinanggap ang pahintulot ng manager para sa mga hindi pa naihahatid na item.",
-    "kitchenDeliveryOverrideInvalid": "Mali ang PIN ng manager. Subukan muli."
+    "kitchenDeliveryOverrideInvalid": "Mali ang PIN ng manager. Subukan muli.",
+    "taxPreviewRequired": "Hindi pa handa ang preview ng halaga. Hintayin matapos ang pagkalkula ng kabuuan, pagkatapos ay i-place muli ang order."
   },
   "printTest": {
     "amt": "Halaga",

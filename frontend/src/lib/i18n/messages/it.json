@@ -990,7 +990,8 @@
     "kitchenItemsPendingWarning": "{count, plural, one {Ci sono ancora # articoli in preparazione in cucina} other {Ci sono ancora # articoli in preparazione in cucina}}",
     "kitchenDeliveryOverridePrompt": "Gli articoli della cucina non sono ancora stati consegnati. Inserisci il PIN del responsabile per autorizzare il pagamento.",
     "kitchenDeliveryOverrideSuccess": "Autorizzazione del responsabile accettata per gli articoli non consegnati.",
-    "kitchenDeliveryOverrideInvalid": "PIN del responsabile non valido. Riprova."
+    "kitchenDeliveryOverrideInvalid": "PIN del responsabile non valido. Riprova.",
+    "taxPreviewRequired": "L'anteprima dell'importo non è ancora pronta. Attendi il calcolo del totale, poi registra di nuovo l'ordine."
   },
   "printTest": {
     "amt": "Importo",

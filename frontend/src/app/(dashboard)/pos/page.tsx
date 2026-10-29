@@ -6,7 +6,6 @@ import { useAuthStore } from '@/store/auth';
 import { useCartStore } from '@/store/cart';
 import { useHeldOrdersStore } from '@/store/held-orders';
 import { usePosSettingsStore } from '@/store/pos-settings';
-import { useSidebar } from '@/components/ui/sidebar';
 import toast from 'react-hot-toast';
 import { ShoppingCart, X } from 'lucide-react';
 import type { Addon, Category, Product, Table, Bill, Order, CartItem } from '@/lib/types';
@@ -39,6 +38,8 @@ import { useBarcodeScanner } from '@/hooks/useBarcodeScanner';
 import { useTranslations } from 'use-intl';
 import { Ltr } from '@/components/layout/Ltr';
 import { useFormatCurrency } from '@/hooks/useFormatCurrency';
+import { useTaxPreview } from '@/hooks/use-tax-preview';
+import type { PaymentAttempt } from '@/lib/payment-attempt';
 import { useSupportTicketStatus } from '@/hooks/useSupportTicketStatus';
 import { useSupportDiagnosticsPreview } from '@/hooks/useSupportDiagnosticsPreview';
 import { getCurrencySymbol, getCountryByCode } from '@/lib/countries';
@@ -107,10 +108,25 @@ export default function POSPage() {
   const cart = useCartStore();
   const heldOrders = useHeldOrdersStore();
   const { customerMandatory, autoPrintKot, autoPrintBill, billingType, tablesRequired, kotPrintingEnabled, setBillingType, setTablesRequired, setKotPrintingEnabled } = usePosSettingsStore();
-  const { open: leftSidebarOpen } = useSidebar();
   const t = useTranslations('pos');
   const tSupport = useTranslations('support');
   const currencyFmt = useFormatCurrency();
+  // The cart's money breakdown comes from the server preview. Nothing here
+  // recomputes tax, discount or the payable total.
+  const {
+    tax: cartTaxPreview,
+    loading: cartTaxLoading,
+    error: cartTaxError,
+    retry: retryCartTax,
+  } = useTaxPreview(cart.items, cart.customerId ?? null);
+  // The payment attempt is owned here rather than inside the modal, so closing
+  // the modal cannot forget an unresolved payment. It is read back only for the
+  // bill and user it was minted for.
+  const [paymentAttemptScope, setPaymentAttemptScope] = useState<{
+    billId: string;
+    userId: string;
+    attempt: PaymentAttempt;
+  } | null>(null);
   const { confirm, ConfirmDialog } = useConfirm();
   const cashDrawer = useCashDrawerMovements();
   const shift = useCashSession();
@@ -367,6 +383,14 @@ export default function POSPage() {
   const { printBill, printKot } = usePrinterStore();
   const billingIsPrepaid = billingType === 'prepaid';
   const shouldTakePaymentNow = billingIsPrepaid;
+  // A postpaid order must never be placed against a preview that is still
+  // computing, has failed, or has not landed yet — the kitchen would get a
+  // ticket with no trustworthy amount behind it. The prepaid path is left out
+  // on purpose: PrepaidCheckoutModal already refuses to take money without a
+  // preview, and gating here would make that modal unreachable.
+  const taxPreviewBlocksOrder =
+    !shouldTakePaymentNow
+    && (cartTaxLoading || cartTaxError !== null || cartTaxPreview === null);
 
   const printKotIfEnabled = async (order: Order) => {
     // Master kot_printing_enabled check gates both manual and automatic prints.
@@ -612,6 +636,13 @@ export default function POSPage() {
     // Prepaid stores collect payment before finishing the order.
     if (shouldTakePaymentNow) {
       setShowPrepaidCheckout(true);
+      return;
+    }
+
+    // The cart button is disabled on the same condition, but the table picker
+    // calls this handler directly, so the guard has to live here too.
+    if (taxPreviewBlocksOrder) {
+      toast.error(t('taxPreviewRequired'));
       return;
     }
 
@@ -1076,6 +1107,27 @@ export default function POSPage() {
     }
   };
 
+  const handlePaymentAttemptChange = useCallback((next: PaymentAttempt | null) => {
+    if (!next || !paymentBill) {
+      setPaymentAttemptScope(null);
+      return;
+    }
+    setPaymentAttemptScope({
+      billId: String(paymentBill.id),
+      userId: activeUserId || '',
+      attempt: next,
+    });
+  }, [paymentBill, activeUserId]);
+
+  // Only surface the attempt for the bill and user it was minted for, so a
+  // different bill or a different cashier never inherits someone else's key.
+  const activePaymentAttempt = paymentBill
+    && paymentAttemptScope
+    && paymentAttemptScope.billId === String(paymentBill.id)
+    && paymentAttemptScope.userId === (activeUserId || '')
+    ? paymentAttemptScope.attempt
+    : null;
+
   const cartPanelProps = {
     tables,
     currency,
@@ -1084,6 +1136,13 @@ export default function POSPage() {
     onShowTablePicker: () => setShowTablePicker(true),
     onEditItem: setEditingCartItem,
     existingOrder: pendingOrder,
+    taxPreview: cartTaxPreview,
+    taxPreviewLoading: cartTaxLoading,
+    taxPreviewError: cartTaxError,
+    onRetryTaxPreview: retryCartTax,
+    // Same predicate as the guard inside handlePlaceOrder — one definition, so
+    // the button and the handler can never disagree.
+    placeOrderBlocked: taxPreviewBlocksOrder,
   };
 
   const itemCount = cart.itemCount();
@@ -1203,12 +1262,12 @@ export default function POSPage() {
             setSearch={setSearch}
             currency={currency}
             onProductClick={handleProductClick}
-            sidebarOpen={leftSidebarOpen}
           />
         </div>
 
-        {/* Desktop Cart — always open, hidden on mobile */}
-        <div className="hidden md:flex md:w-80 md:shrink-0 h-full">
+        {/* Desktop Cart — docked from lg up. Below lg it becomes the Drawer
+            below, so the two breakpoints must stay in step. */}
+        <div className="hidden lg:flex lg:w-72 xl:w-80 shrink-0 h-full">
           <CartPanel {...cartPanelProps} />
         </div>
       </div>
@@ -1216,17 +1275,31 @@ export default function POSPage() {
       {/* Mobile: Floating Cart Button + Bottom Sheet — outside flex container */}
       <Drawer open={mobileCartOpen} onOpenChange={setMobileCartOpen}>
         <DrawerTrigger asChild>
-          <button className="touch-target fixed bottom-5 end-5 z-40 w-14 h-14 bg-brand text-white rounded-full shadow-lg hover:bg-brand-hover active:bg-brand-hover transition-colors md:hidden" aria-label={t('cart')}>
-            <ShoppingCart size={22} />
+          <button
+            className="touch-manipulation fixed bottom-5 end-5 z-40 flex h-14 min-w-14 items-center gap-2 rounded-full bg-brand px-4 text-white shadow-lg transition-colors hover:bg-brand-hover active:bg-brand-hover lg:hidden"
+            aria-label={t('cart')}
+          >
+            <ShoppingCart size={20} />
             {itemCount > 0 && (
-              <span className="absolute -top-0.5 -end-0.5 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center font-bold">
-                {itemCount}
+              <span className="flex flex-col items-start leading-tight">
+                <span className="text-[10px] font-semibold opacity-85">
+                  {t('items')} {itemCount}
+                </span>
+                {/* The payable amount stays reachable while the cart is a drawer. */}
+                <span className="text-sm font-bold tabular-nums">
+                  {cartTaxPreview && !cartTaxLoading && !cartTaxError
+                    ? currencyFmt(cartTaxPreview.total)
+                    : '\u2014'}
+                </span>
               </span>
             )}
           </button>
         </DrawerTrigger>
         <DrawerContent className="max-h-[85vh]">
-          <div className="overflow-y-auto max-h-[80vh] px-2 pb-2">
+          {/* The drawer body is a bounded flex column, not a scroll box: the item
+              list is the only scroller, so the payable total and the place-order
+              button stay on screen instead of being pushed past the viewport. */}
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-2">
             <CartPanel {...cartPanelProps} variant="drawer" />
           </div>
         </DrawerContent>
@@ -1304,6 +1377,8 @@ export default function POSPage() {
           onClose={() => { setPaymentBill(null); setCheckoutOverridePin(undefined); }}
           onPaid={handlePaymentComplete}
           onBillUpdate={(updated) => setPaymentBill(updated)}
+          paymentAttempt={activePaymentAttempt}
+          onPaymentAttemptChange={handlePaymentAttemptChange}
         />
       )}
 

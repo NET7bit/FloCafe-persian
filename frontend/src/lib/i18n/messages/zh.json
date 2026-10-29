@@ -990,7 +990,8 @@
     "kitchenItemsPendingWarning": "{count, plural, one {厨房仍有 # 道菜正在准备} other {厨房仍有 # 道菜正在准备}}",
     "kitchenDeliveryOverridePrompt": "厨房菜品尚未送达。请输入经理 PIN 以授权结账。",
     "kitchenDeliveryOverrideSuccess": "已接受经理对未送达菜品的授权。",
-    "kitchenDeliveryOverrideInvalid": "经理 PIN 无效，请重试。"
+    "kitchenDeliveryOverrideInvalid": "经理 PIN 无效，请重试。",
+    "taxPreviewRequired": "金额预览尚未就绪，请等待总额计算完成后再重新提交订单。"
   },
   "printTest": {
     "amt": "金额",

@@ -881,7 +881,8 @@
     "customerRequiredForAccount": "Zgjidh një klient për ta ngarkuar në llogarinë e klientit",
     "neesieChecksTitle": "Ngarko në llogarinë e klientit",
     "neesieChecksHint": "Prej klientëve për t'i shtuar faturat në llogarinë e klientit të porosisë — çdo faturë me borxhi ngarkohet te i njëjti klient; pjesën tjetër e mbledhë si zakonisht.",
-    "neesieChecksCount": "{count, plural, other {# fatura do të ngarkohen te klienti i porosisë}}"
+    "neesieChecksCount": "{count, plural, other {# fatura do të ngarkohen te klienti i porosisë}}",
+    "taxPreviewRequired": "Pamja paraprake e shumës nuk është gati ende. Prisni të përfundojë llogaritja e totalit, më pas regjistroni përsëri porosinë."
   },
   "printTest": {
     "amt": "Shuma",

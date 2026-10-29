@@ -990,7 +990,8 @@
     "kitchenItemsPendingWarning": "{count, plural, one {Hay # artículo(s) aún en preparación en la cocina} other {Hay # artículo(s) aún en preparación en la cocina}}",
     "kitchenDeliveryOverridePrompt": "Los artículos de cocina aún no se han entregado. Introduce el PIN de gerente para autorizar el cobro.",
     "kitchenDeliveryOverrideSuccess": "Se aceptó la autorización del gerente para los artículos sin entregar.",
-    "kitchenDeliveryOverrideInvalid": "El PIN de gerente no es válido. Inténtalo de nuevo."
+    "kitchenDeliveryOverrideInvalid": "El PIN de gerente no es válido. Inténtalo de nuevo.",
+    "taxPreviewRequired": "La vista previa del importe aún no está lista. Espera a que se calcule el total y vuelve a registrar el pedido."
   },
   "printTest": {
     "amt": "Total",

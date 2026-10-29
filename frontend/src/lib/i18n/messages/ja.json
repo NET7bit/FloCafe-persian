@@ -990,7 +990,8 @@
     "kitchenItemsPendingWarning": "{count, plural, one {キッチンで準備中の商品が # 件あります} other {キッチンで準備中の商品が # 件あります}}",
     "kitchenDeliveryOverridePrompt": "キッチンの商品はまだ提供されていません。会計を承認するにはマネージャー PIN を入力してください。",
     "kitchenDeliveryOverrideSuccess": "未提供の商品に対するマネージャーの承認を受け付けました。",
-    "kitchenDeliveryOverrideInvalid": "マネージャー PIN が正しくありません。もう一度お試しください。"
+    "kitchenDeliveryOverrideInvalid": "マネージャー PIN が正しくありません。もう一度お試しください。",
+    "taxPreviewRequired": "金額のプレビューはまだ準備できていません。合計の計算が終わるまで待ってから、もう一度注文を確定してください。"
   },
   "printTest": {
     "amt": "金額",

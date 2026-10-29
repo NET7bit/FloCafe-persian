@@ -990,7 +990,8 @@
     "kitchenItemsPendingWarning": "{count, plural, one {# صنفًا ما زال قيد التحضير في المطبخ} other {# صنفًا ما زال قيد التحضير في المطبخ}}",
     "kitchenDeliveryOverridePrompt": "لم تُسلَّم أصناف المطبخ بعد. أدخل الرقم السري للمدير للسماح بالفوترة.",
     "kitchenDeliveryOverrideSuccess": "تم قبول تجاوز المدير للأصناف غير المسلّمة.",
-    "kitchenDeliveryOverrideInvalid": "الرقم السري للمدير غير صحيح. حاول مرة أخرى."
+    "kitchenDeliveryOverrideInvalid": "الرقم السري للمدير غير صحيح. حاول مرة أخرى.",
+    "taxPreviewRequired": "معاينة المبلغ ليست جاهزة بعد. انتظر حتى يتم حساب الإجمالي ثم أعد تسجيل الطلب."
   },
   "printTest": {
     "amt": "المبلغ",
