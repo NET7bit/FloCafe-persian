@@ -3,12 +3,13 @@
  * Behavioral table update coverage lives in tables-string-ids.test.ts; these checks
  * keep the responsive layout and dark-mode utilities from being accidentally removed.
  *
- * The final section is different in kind: it renders the real CartPanel through
- * react-dom/server and asserts the rendered `disabled` attribute of the
- * place-order button under each tax-preview state (D.10-H.11I, F5). That block
- * runs the component body, so it is a rendered guard rather than a text guard —
- * but it runs no effects and fires no click, so it says nothing about
- * handlePlaceOrder, POST /orders, the prepaid branch, or the table-picker path.
+ * The final sections are different in kind: they render the real CartPanel and
+ * TablePickerModal through react-dom/server and assert the rendered `disabled`
+ * attribute of their place-order buttons under each tax-preview state
+ * (D.10-H.11I F5; D.10-H.11P C3). Those blocks run the component body, so they
+ * are rendered guards rather than text guards — but they run no effects and
+ * fire no click, so they say nothing about onPlaceOrder, POST /orders, the
+ * prepaid branch, or the table picker's own callback.
  */
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
@@ -63,6 +64,15 @@ assert.ok(
   'change returned stays below the payment controls',
 );
 
+// The table picker must be told about the same blocked state the cart uses, or
+// it places the order on a preview the screen already refused (C3, D.10-H.11P).
+const posPage = source('frontend/src/app/(dashboard)/pos/page.tsx');
+assert.match(
+  posPage,
+  /<TablePickerModal[\s\S]*?placeOrderBlocked=\{taxPreviewBlocksOrder\}/,
+  'the table picker receives the same blocked state as the cart',
+);
+
 // ── F5 place-order gate, rendered (D.10-H.11I) ──────────────────────────────
 // CartPanel.tsx:453 disables the place-order button on
 // `submitting || cart.items.length === 0 || placeOrderBlocked`. These four
@@ -71,17 +81,18 @@ assert.ok(
 const Module = require('module');
 const frontendRequire = Module.createRequire(resolve(process.cwd(), 'frontend/package.json'));
 
-interface CartPanelHarness {
+interface PosRenderHarness {
   React: any;
   ReactDOMServer: any;
   IntlProvider: any;
   CartPanel: any;
+  TablePickerModal: any;
   useCartStore: any;
   useAuthStore: any;
   messages: any;
 }
 
-function loadCartPanelHarness(): CartPanelHarness {
+function loadPosRenderHarness(): PosRenderHarness {
   const originalResolveFilename = Module._resolveFilename;
   // The frontend resolves tsconfig path aliases; mirror them exactly, and only
   // while the module graph below is loading. Same pattern as
@@ -100,6 +111,7 @@ function loadCartPanelHarness(): CartPanelHarness {
       ReactDOMServer: frontendRequire('react-dom/server'),
       IntlProvider: frontendRequire('use-intl').IntlProvider,
       CartPanel: require('../frontend/src/components/pos/CartPanel').default,
+      TablePickerModal: require('../frontend/src/components/pos/TablePickerModal').default,
       useCartStore: require('../frontend/src/store/cart').useCartStore,
       useAuthStore: require('../frontend/src/store/auth').useAuthStore,
       messages: require('../frontend/src/lib/i18n/messages/en.json'),
@@ -110,8 +122,8 @@ function loadCartPanelHarness(): CartPanelHarness {
 }
 
 const {
-  React, ReactDOMServer, IntlProvider, CartPanel, useCartStore, useAuthStore, messages,
-} = loadCartPanelHarness();
+  React, ReactDOMServer, IntlProvider, CartPanel, TablePickerModal, useCartStore, useAuthStore, messages,
+} = loadPosRenderHarness();
 
 // zustand reads its store through useSyncExternalStore, and a server render uses
 // that hook's *server* snapshot — the state captured when the store was created,
@@ -255,5 +267,52 @@ try {
 }
 
 console.log('  ✓ CartPanel renders the place-order button disabled exactly when the tax preview is blocked (F5)');
+
+// ── C3 place-order gate in the table picker, rendered (D.10-H.11P) ──────────
+// TablePickerModal's place-order button used to call onPlaceOrder *and* close
+// the modal unconditionally, so a preview the screen had already refused still
+// dismissed the picker and left only the handler's toast. The button now mirrors
+// CartPanel's `placeOrderBlocked`. These two checks render the real component
+// and read the real attribute. They run no effects and fire no click, so they
+// pin the rendered contract, not onPlaceOrder.
+const pickerUseSyncExternalStore = React.useSyncExternalStore;
+React.useSyncExternalStore = (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot();
+try {
+  const renderTablePicker = (props: Record<string, unknown>): string => ReactDOMServer.renderToStaticMarkup(
+    React.createElement(
+      IntlProvider,
+      { locale: 'en', messages },
+      React.createElement(TablePickerModal, {
+        tables: [],
+        selectedTableId: '1',
+        onSelectAvailable: () => undefined,
+        onSelectOccupied: () => undefined,
+        onSelectHeld: () => undefined,
+        onPlaceOrder: () => undefined,
+        onHoldTable: () => undefined,
+        onClose: () => undefined,
+        ...props,
+      }),
+    ),
+  );
+
+  // T11 — blocked preview: the picker must render its place-order button disabled.
+  const blockedPicker = renderTablePicker({ placeOrderBlocked: true });
+  assert.ok(
+    hasDisabledAttribute(placeOrderButtonTag(blockedPicker, placeOrderLabel)),
+    'T11: the table picker must render its place-order button disabled while the preview is blocked',
+  );
+
+  // T12 — the control: same picker, only placeOrderBlocked flips.
+  const unblockedPicker = renderTablePicker({ placeOrderBlocked: false });
+  assert.ok(
+    !hasDisabledAttribute(placeOrderButtonTag(unblockedPicker, placeOrderLabel)),
+    'T12: the table picker must not disable its place-order button when the preview is usable',
+  );
+} finally {
+  React.useSyncExternalStore = pickerUseSyncExternalStore;
+}
+
+console.log('  ✓ TablePickerModal renders the place-order button disabled exactly when the tax preview is blocked (C3)');
 
 console.log('✓ UI regression guards for issues #621, #623, #625, and #626 passed');

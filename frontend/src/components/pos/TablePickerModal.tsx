@@ -15,6 +15,8 @@ interface Props {
   onPlaceOrder: () => void;
   onHoldTable: (tableId: string) => void;
   onClose: () => void;
+  /** Set by the screen that owns the preview; disables placing while it is unusable. */
+  placeOrderBlocked?: boolean;
 }
 
 type PosKey = keyof AppConfig['Messages']['pos'];
@@ -29,6 +31,7 @@ const statusStyles: Record<string, { border: string; badge: string; badgeKey: Po
 
 export default function TablePickerModal({
   tables, selectedTableId, onSelectAvailable, onSelectOccupied, onSelectHeld, onPlaceOrder, onHoldTable, onClose,
+  placeOrderBlocked = false,
 }: Props) {
   const heldOrders = useHeldOrdersStore();
   const t = useTranslations('pos');
@@ -120,10 +123,19 @@ export default function TablePickerModal({
             </button>
             <button
               onClick={() => {
+                // A blocked preview must not place the order *and* dismiss the
+                // picker: closing here would strand the cashier with no visible
+                // reason. handlePlaceOrder keeps its own guard as a backstop.
+                if (placeOrderBlocked) return;
                 onPlaceOrder();
                 onClose();
               }}
-              className="touch-target flex-1 px-4 rounded-xl bg-brand text-white font-medium hover:bg-brand/90 active:bg-brand/90 transition-colors"
+              disabled={placeOrderBlocked}
+              className={`touch-target flex-1 px-4 rounded-xl font-medium transition-colors ${
+                placeOrderBlocked
+                  ? 'bg-brand/40 text-white/70 cursor-not-allowed'
+                  : 'bg-brand text-white hover:bg-brand/90 active:bg-brand/90'
+              }`}
             >
               {t('placeOrderButton')}
             </button>

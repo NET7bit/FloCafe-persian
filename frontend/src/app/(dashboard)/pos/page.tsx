@@ -1319,6 +1319,7 @@ export default function POSPage() {
           onPlaceOrder={handlePlaceOrder}
           onHoldTable={handleHoldTable}
           onClose={() => setShowTablePicker(false)}
+          placeOrderBlocked={taxPreviewBlocksOrder}
         />
       )}
 
