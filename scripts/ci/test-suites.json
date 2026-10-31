@@ -220,5 +220,6 @@
   "test:migration-registry",
   "test:import-restore-y1-y2-hardening",
   "test:lazy-startup-modules",
+  "test:db-path-isolation",
   "test:accounting-ui"
 ]

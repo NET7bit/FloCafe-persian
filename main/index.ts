@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 
 import { Bonjour } from 'bonjour-service';
-import { getDatabase, initDatabase, closeDatabase, waitForDatabaseRequests, beginDatabaseShutdown, SchemaVersionMismatchError, now, withDatabaseRequest } from './db';
+import { getDatabase, initDatabase, closeDatabase, waitForDatabaseRequests, beginDatabaseShutdown, SchemaVersionMismatchError, now, withDatabaseRequest, resolveIsolatedUserDataRoot } from './db';
 import { describeStartupFailure, startupFailureTelemetryFields } from './startup-failure';
 import { runStartupRestoreFlow } from './startup-restore';
 import { BETA_CHANNEL_SETTING_KEY, parseStoredBetaChannelEnabled, resolveUpdateChannel } from './update-channel';
@@ -583,9 +583,12 @@ const isForkSelfUpdateDisabled = process.env.FLO_UPDATER !== 'enabled';
 let gotSingleInstanceLock = false;
 
 // Single-instance lock: prevent duplicate app instances.
-if (process.env.FLO_E2E_USER_DATA_DIR) {
+// The override is validated first: a root inside the repository throws here,
+// before userData is redirected, so no artefact can land in the checkout.
+const isolatedUserDataDir = resolveIsolatedUserDataRoot();
+if (isolatedUserDataDir) {
   // Use isolated profile directory in E2E tests.
-  app.setPath('userData', path.resolve(process.env.FLO_E2E_USER_DATA_DIR));
+  app.setPath('userData', isolatedUserDataDir);
 } else if (process.platform === 'linux') {
   // Set explicit paths on Linux to avoid temporary mount directories.
   app.name = 'flo-desktop';

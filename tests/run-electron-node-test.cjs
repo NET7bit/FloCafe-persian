@@ -19,6 +19,9 @@ function runElectronNode(extraArgs, stdio = 'inherit') {
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: '1',
+        // The child loads main/db, whose resolver refuses to fall back to the
+        // repository database once this is set.
+        FLO_E2E_TEST_RUNTIME: '1',
       },
       encoding: stdio === 'pipe' ? 'utf8' : undefined,
       timeout: 600_000,

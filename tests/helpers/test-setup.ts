@@ -34,6 +34,11 @@
  * failures through getResults().
  */
 
+// Declare this process a test runtime before `main/db` is loaded, so its path
+// resolver fails closed instead of silently falling back to the repository
+// database. Must stay above the requires below: an import would be hoisted.
+if (!process.env.FLO_E2E_TEST_RUNTIME) process.env.FLO_E2E_TEST_RUNTIME = '1';
+
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');

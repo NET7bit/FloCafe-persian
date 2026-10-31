@@ -594,26 +594,150 @@ export function isFkSensitiveWriteRequest(req: Request): boolean {
   return true;
 }
 
+/** Repository root derived from the compiled module location, never from cwd. */
+function projectRootDir(): string {
+  return path.basename(path.dirname(__dirname)) === 'dist'
+    ? path.resolve(__dirname, '../..')
+    : path.resolve(__dirname, '..');
+}
+
+/** Case-insensitive, separator-normalised form for comparing paths on Windows
+ * without opening either file. */
+function canonicalPath(target: string): string {
+  const resolved = path.resolve(target);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+/** True when a relative path leaves its parent: the exact `..` component, a
+ * path starting with it, or an absolute path (a different drive). A directory
+ * named `..foo` is a legitimate child and must not be read as the traversal
+ * component. */
+function escapesParent(relative: string): boolean {
+  return relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative);
+}
+
+/** Resolve a path through its longest existing prefix, so a junction or symlink
+ * above a directory that has not been created yet is still followed. Only
+ * ENOENT is treated as "not created yet"; any other failure propagates, because
+ * an unverifiable path must not be assumed safe. */
+function resolveThroughExisting(target: string): string {
+  let current = path.resolve(target);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      const resolved = fs.realpathSync.native(current);
+      return tail.length > 0 ? path.join(resolved, ...tail.reverse()) : resolved;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
+      const parent = path.dirname(current);
+      if (parent === current) throw error;
+      tail.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+/** True when `candidate` is `parent` itself or lives under it. Compares path
+ * components, not string prefixes, so `/repo-other` never matches `/repo` and a
+ * child named `..foo` is still a child. Both sides are resolved through their
+ * existing prefix, which catches junctions and symlinks without opening the
+ * database. When containment cannot be established the call fails closed instead
+ * of reporting "outside". */
+function isInsideOrEqual(candidate: string, parent: string): boolean {
+  const within = (childPath: string, parentPath: string): boolean => {
+    const relative = path.relative(parentPath, childPath);
+    return relative === '' || !escapesParent(relative);
+  };
+  if (within(canonicalPath(candidate), canonicalPath(parent))) return true;
+  try {
+    return within(
+      canonicalPath(resolveThroughExisting(candidate)),
+      canonicalPath(resolveThroughExisting(parent)),
+    );
+  } catch (error) {
+    const detail = (error as Error)?.message ?? String(error);
+    throw new Error(`[DB] Unable to validate path isolation for ${candidate} (${detail})`);
+  }
+}
+
+/** Validate the test data root override and return it, or null when it is not
+ * set. Exported so the Electron entry point applies the same boundary check
+ * before it redirects `userData`, instead of keeping a second implementation of
+ * the path-boundary rule. */
+export function resolveIsolatedUserDataRoot(): string | null {
+  const raw = process.env.FLO_E2E_USER_DATA_DIR;
+  if (!raw) return null;
+  const isolated = path.resolve(raw);
+  // A test root inside the repository would put the database, its backups, the
+  // marker and every userData artefact back into the checkout, which is exactly
+  // what this override is meant to prevent.
+  if (isInsideOrEqual(isolated, projectRootDir())) {
+    throw new Error('[DB] FLO_E2E_USER_DATA_DIR must not be the repository or a directory inside it');
+  }
+  return isolated;
+}
+
+/** The one root every on-disk artefact (database, backups, marker) derives from. */
+function resolveDataRoot(): string {
+  // The native Playwright harness points this at a disposable profile directory.
+  const isolated = resolveIsolatedUserDataRoot();
+  if (isolated) return isolated;
+  if (app.isPackaged) return app.getPath('userData');
+  return projectRootDir();
+}
+
+/** Set by the test entrypoints before `main/db` is loaded. */
+function isTestRuntime(): boolean {
+  return process.env.FLO_E2E_TEST_RUNTIME === '1';
+}
+
 export function getDbPath(): string {
   // Native Playwright owns this path for its disposable local Electron run.
   // It is intentionally opt-in and has no effect on normal desktop installs.
-  if (process.env.FLO_E2E_DB_PATH) return path.resolve(process.env.FLO_E2E_DB_PATH);
-  const projectRoot = path.basename(path.dirname(__dirname)) === 'dist'
-    ? path.resolve(__dirname, '../..')
-    : path.resolve(__dirname, '..');
-  const userDataPath = app.isPackaged ? app.getPath('userData') : projectRoot;
-  return path.join(userDataPath, 'flo.db');
+  if (process.env.FLO_E2E_DB_PATH) {
+    const isolated = path.resolve(process.env.FLO_E2E_DB_PATH);
+    // An override must never point back at the repository's own database: the
+    // run would then seed the operator's data while believing it is isolated.
+    // Any path inside the checkout is refused, not just the database file
+    // itself: a test database under a subdirectory would still seed the repo.
+    if (isInsideOrEqual(isolated, projectRootDir())) {
+      throw new Error('[DB] FLO_E2E_DB_PATH must not be the repository or a directory inside it');
+    }
+    return isolated;
+  }
+  const root = resolveDataRoot();
+  // Fail closed. Without an isolated root a test run would open <repo>/flo.db and
+  // silently write to it, so refuse instead of falling back.
+  if (isTestRuntime() && isInsideOrEqual(root, projectRootDir())) {
+    throw new Error(
+      '[DB] Test runtime has no isolated data root. Set FLO_E2E_USER_DATA_DIR '
+      + '(or FLO_E2E_DB_PATH) instead of falling back to the repository database.',
+    );
+  }
+  return path.join(root, 'flo.db');
 }
 
+/** Sidecar artefacts follow the selected database, never the real install. */
 function getBackupDir(): string {
-  const userDataPath = app.getPath('userData');
-  return path.join(userDataPath, 'backups');
+  // A database override keeps snapshots, restore journals and the marker beside
+  // that database instead of in userData.
+  if (process.env.FLO_E2E_DB_PATH) {
+    return path.join(path.dirname(path.resolve(process.env.FLO_E2E_DB_PATH)), 'backups');
+  }
+  // An isolated test root keeps its backups inside that root. Every other run —
+  // development and packaged alike — keeps them in userData, where they have
+  // always lived: the repository location was rejected (D1).
+  const isolatedRoot = resolveIsolatedUserDataRoot();
+  if (isolatedRoot) return path.join(isolatedRoot, 'backups');
+  return path.join(app.getPath('userData'), 'backups');
 }
 
 // Marker written on first startup to distinguish empty fresh install from missing db file.
 function getDbInitializedMarkerPath(): string {
-  const userDataPath = app.getPath('userData');
-  return path.join(userDataPath, '.flo-db-initialized');
+  if (process.env.FLO_E2E_DB_PATH) {
+    return path.join(path.dirname(path.resolve(process.env.FLO_E2E_DB_PATH)), '.flo-db-initialized');
+  }
+  return path.join(resolveDataRoot(), '.flo-db-initialized');
 }
 
 type ReplacementJournal = {

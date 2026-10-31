@@ -12,12 +12,41 @@ sections below are the parts a contributor needs in order to change it safely.
 `getDbPath()` resolves the file in this order:
 
 1. `FLO_E2E_DB_PATH`, resolved to an absolute path, when set. The native Playwright suites use this
-   to point at a disposable database; it has no effect on a normal install.
-2. `app.getPath('userData')` in a packaged build.
-3. The project root in an unpackaged run, computed from the compiled output location.
+   to point at a disposable database; it has no effect on a normal install. It is **refused** when it
+   resolves to the repository's own `flo.db`.
+2. `FLO_E2E_USER_DATA_DIR`, resolved to an absolute path, when set. The native Playwright harness
+   uses it as the whole data root for a disposable Electron profile.
+3. `app.getPath('userData')` in a packaged build.
+4. The project root in an unpackaged run, computed from the compiled output location.
 
-The file is named `flo.db`. The backup directory is `backups/` under `userData`, and the
-first-start marker is `.flo-db-initialized` under `userData`.
+A process that declares itself a test runtime (`FLO_E2E_TEST_RUNTIME=1`, set by
+`tests/helpers/test-setup.ts` and `tests/run-electron-node-test.cjs`) **refuses to start** when
+neither of the first two is set and the resolved root is the project root, rather than silently
+opening the repository database.
+
+The file is named `flo.db`. The database follows the root above; the sidecar artefacts follow the
+backup root:
+
+| Artefact | Location |
+| --- | --- |
+| database | `<root>/flo.db` |
+| `-wal` / `-shm` | beside the database (SQLite) |
+| backups, pre-migration snapshots, restore/reset journals | `<backup root>/backups/` |
+| first-start marker | `<root>/.flo-db-initialized` |
+
+The backup root is the isolated test root when `FLO_E2E_USER_DATA_DIR` is set, and
+`app.getPath('userData')` otherwise — including a normal development run, where only the database
+file itself lives in the project root. When `FLO_E2E_DB_PATH` is set, `backups/` and the marker move
+beside that database, so a database override alone can never leave snapshots or journals in the real
+install. The first-start marker is only written by a packaged build.
+
+One override is validated before anything is created: `FLO_E2E_USER_DATA_DIR` is refused when it
+resolves to the repository or to any directory inside it, so a test root cannot put the database
+back into the checkout.
+
+The check compares path components rather than string prefixes, ignores case on Windows, and
+resolves existing parent directories, so `..`, a differently-cased path or a junction cannot
+smuggle the repository back in.
 
 ## Connection pragmas
 
@@ -36,9 +65,9 @@ self-contained.
 
 ## The migration registry
 
-`MIGRATIONS` is an exported, append-only array of `{ version, name, up }`. **There are 92 entries,
-numbered 1 through 92 with no gaps and no duplicates**, and the highest is `version: 92`. The
-highest entry is `add_table_reservation_customer`.
+`MIGRATIONS` is an exported, append-only array of `{ version, name, up }`. **There are 111 entries
+with no duplicate versions**, from `version: 1` to `version: 1014`. The highest entry is
+`link_payroll_employees_to_customers_and_track_purchase_deductions`.
 
 Two rules follow from the array being the registry:
 

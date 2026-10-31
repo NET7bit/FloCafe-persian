@@ -73,6 +73,7 @@
     "test:menu-surface": "ts-node --transpile-only -P tests/tsconfig.json tests/menu-surface.test.ts",
     "test:theme-fouc-script": "ts-node --transpile-only -P tests/tsconfig.json tests/theme-fouc-script.test.ts",
     "test:ui-regressions-621-623-626": "ts-node --transpile-only -P tests/tsconfig.json tests/ui-regressions-621-623-626.test.ts",
+    "test:db-path-isolation": "ts-node --transpile-only -P tests/tsconfig.json tests/db-path-isolation.test.ts",
     "test:window-readiness": "ts-node --transpile-only -P tests/tsconfig.json tests/window-readiness.test.ts",
     "test:window-load-retry": "ts-node --transpile-only -P tests/tsconfig.json tests/window-load-retry.test.ts",
     "test:runtime-recovery": "ts-node --transpile-only -P tests/tsconfig.json tests/runtime-recovery.test.ts",
