@@ -111,5 +111,118 @@ assert.ok('primary' in okStored && okStored.primary.mode === 'fixed');
 
 console.log('✓ lenient reader with safe fallback');
 
+console.log('Testing read-side salvage when a stored policy names a removed locale...');
+const DEFAULT_POLICY = { primary: { mode: 'inherit' }, additional: [] };
+
+// A language the generated print registry does not carry (locale removal).
+const REMOVED = 'zz';
+
+// Removed primary language -> inherit; nothing else to keep.
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY,
+    `{"primary":{"mode":"fixed","language":"${REMOVED}"}}`),
+  DEFAULT_POLICY,
+);
+
+// Removed primary language, valid additional -> primary inherit, additional kept.
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY,
+    `{"primary":{"mode":"fixed","language":"${REMOVED}"},"additional":["fa"]}`),
+  { primary: { mode: 'inherit' }, additional: ['fa'] },
+);
+
+// Valid fixed primary, removed additional -> primary preserved.
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY,
+    `{"primary":{"mode":"fixed","language":"en"},"additional":["${REMOVED}"]}`),
+  { primary: { mode: 'fixed', language: 'en' }, additional: [] },
+);
+
+// Removed additional next to a valid one -> only the removed entry is dropped.
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY,
+    `{"primary":{"mode":"inherit"},"additional":["${REMOVED}","fa"]}`),
+  { primary: { mode: 'inherit' }, additional: ['fa'] },
+);
+
+// Non-string and blank entries are dropped; the valid entry survives.
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY,
+    '{"primary":{"mode":"inherit"},"additional":[42,"","   ","fa"]}'),
+  { primary: { mode: 'inherit' }, additional: ['fa'] },
+);
+
+// Non-array additional is structural damage, not a removed locale -> default.
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY,
+    '{"primary":{"mode":"inherit"},"additional":"fa"}'),
+  DEFAULT_POLICY,
+);
+
+// Duplicates collapse to the first occurrence.
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY,
+    '{"primary":{"mode":"inherit"},"additional":["fa","fa"]}'),
+  { primary: { mode: 'inherit' }, additional: ['fa'] },
+);
+
+// An additional entry equal to the fixed primary is a conflict -> removed.
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY,
+    '{"primary":{"mode":"fixed","language":"en"},"additional":["en"]}'),
+  { primary: { mode: 'fixed', language: 'en' }, additional: [] },
+);
+
+// Receipt cap: at most one additional, first surviving entry wins.
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY,
+    '{"primary":{"mode":"inherit"},"additional":["fa","en"]}'),
+  { primary: { mode: 'inherit' }, additional: ['fa'] },
+);
+
+// Ordering: filter -> dedupe -> conflict removal -> cap.
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY,
+    `{"primary":{"mode":"fixed","language":"en"},"additional":["${REMOVED}","en","fa"]}`),
+  { primary: { mode: 'fixed', language: 'en' }, additional: ['fa'] },
+);
+
+// KOT cap: no additional entry survives.
+assert.deepEqual(
+  parseStoredLanguagePolicy(KOT_LANGUAGE_POLICY_KEY,
+    '{"primary":{"mode":"fixed","language":"en"},"additional":["fa"]}'),
+  { primary: { mode: 'fixed', language: 'en' }, additional: [] },
+);
+
+// Unknown top-level key and broken primary stay on the default path.
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY,
+    '{"primary":{"mode":"inherit"},"bogus":1}'),
+  DEFAULT_POLICY,
+);
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY, '{"primary":{"mode":"auto"}}'),
+  DEFAULT_POLICY,
+);
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY,
+    '{"primary":{"mode":"fixed","language":"   "}}'),
+  DEFAULT_POLICY,
+);
+
+// Regression: fully valid policies keep their exact previous output.
+assert.deepEqual(
+  parseStoredLanguagePolicy(BILL_LANGUAGE_POLICY_KEY,
+    '{"primary":{"mode":"fixed","language":"fa"},"additional":["en"]}'),
+  { primary: { mode: 'fixed', language: 'fa' }, additional: ['en'] },
+);
+assert.deepEqual(
+  parseStoredLanguagePolicy(Z_REPORT_LANGUAGE_POLICY_KEY,
+    '{"primary":{"mode":"inherit"},"additional":[]}'),
+  DEFAULT_POLICY,
+);
+
+console.log('✓ read-side salvage preserves valid parts and keeps structural defaults');
+
 console.log('✓ Z-report policy normalizes through the public policy contract');
 console.log('\nAll print-language settings tests passed.');

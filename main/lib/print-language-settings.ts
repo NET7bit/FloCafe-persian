@@ -66,6 +66,67 @@ export function validateLanguagePolicySetting(
 
 export type StoredPrintLanguagePolicy = ReceiptLanguagePolicy | KotLanguagePolicy;
 
+/**
+ * Salvage a stored policy that fails strict validation because it names a
+ * language the registry no longer carries (the locale-removal case).
+ *
+ * Rejecting the whole row would silently discard the tenant's valid primary
+ * language — and, for receipts, a valid additional one — so only the
+ * unregistered parts are dropped. Structural corruption still falls back to
+ * the default: this salvage covers registry membership and entry shape, not
+ * arbitrary damage. Returns null when the row is not salvageable.
+ */
+function normalizeStoredPolicy(
+  key: string,
+  parsed: unknown,
+): StoredPrintLanguagePolicy | null {
+  if (key !== BILL_LANGUAGE_POLICY_KEY && key !== Z_REPORT_LANGUAGE_POLICY_KEY
+    && key !== KOT_LANGUAGE_POLICY_KEY) {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+
+  const shape = parsed as Record<string, unknown>;
+  for (const field of Object.keys(shape)) {
+    if (field !== 'primary' && field !== 'additional') return null;
+  }
+
+  const rawPrimary = shape.primary;
+  if (typeof rawPrimary !== 'object' || rawPrimary === null || Array.isArray(rawPrimary)) return null;
+  const primaryShape = rawPrimary as { mode?: unknown; language?: unknown };
+  let primary: { readonly mode: 'inherit' } | { readonly mode: 'fixed'; readonly language: string };
+  if (primaryShape.mode === 'inherit') {
+    primary = { mode: 'inherit' };
+  } else if (primaryShape.mode === 'fixed') {
+    if (typeof primaryShape.language !== 'string' || primaryShape.language.trim().length === 0) {
+      return null;
+    }
+    primary = REGISTRY_FACTS.isSelectableLanguage(primaryShape.language)
+      ? { mode: 'fixed', language: primaryShape.language }
+      : { mode: 'inherit' };
+  } else {
+    return null;
+  }
+
+  const rawAdditional = shape.additional;
+  if (rawAdditional !== undefined && !Array.isArray(rawAdditional)) return null;
+
+  const maxAdditional = key === KOT_LANGUAGE_POLICY_KEY ? 0 : 1;
+  const kept: string[] = [];
+  for (const entry of Array.isArray(rawAdditional) ? rawAdditional : []) {
+    if (typeof entry !== 'string' || entry.trim().length === 0) continue;
+    if (!REGISTRY_FACTS.isSelectableLanguage(entry)) continue;
+    if (primary.mode === 'fixed' && entry === primary.language) continue;
+    if (kept.includes(entry)) continue;
+    kept.push(entry);
+  }
+
+  const additional = kept.slice(0, maxAdditional);
+  return additional.length === 0
+    ? { primary, additional: [] }
+    : { primary, additional: [additional[0]] };
+}
+
 /** Lenient read-side parse of a stored policy, falling back to default. */
 export function parseStoredLanguagePolicy(
   key: string,
@@ -77,10 +138,10 @@ export function parseStoredLanguagePolicy(
     const parsed: unknown = JSON.parse(stored);
     if (key === KOT_LANGUAGE_POLICY_KEY) {
       const result = parseKotLanguagePolicy(parsed, REGISTRY_FACTS);
-      return result.ok ? result.policy : fallback;
+      return result.ok ? result.policy : (normalizeStoredPolicy(key, parsed) ?? fallback);
     }
     const result = parsePrintLanguagePolicy(parsed, REGISTRY_FACTS);
-    return result.ok ? result.policy : fallback;
+    return result.ok ? result.policy : (normalizeStoredPolicy(key, parsed) ?? fallback);
   } catch {
     return fallback;
   }
