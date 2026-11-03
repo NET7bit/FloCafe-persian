@@ -280,7 +280,7 @@ async function run(): Promise<void> {
         assert(translated !== enVal, `Persian translation for ${key} falls back to English: "${translated}"`);
       }
     }
-    console.log(`  ✓ ${key}: en="${t(key, 'en')}" | es="${t(key, 'es')}" | fr="${t(key, 'fr')}" | pt="${t(key, 'pt')}" | fa="${t(key, 'fa')}"`);
+    console.log(`  ✓ ${key}: en="${t(key, 'en')}" | fa="${t(key, 'fa')}"`);
   }
 
   // =========================================================================

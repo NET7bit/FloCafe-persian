@@ -52,16 +52,16 @@ function insertStaffUser(db: ReturnType<typeof getDatabase>, id: string, name: s
 type SeedLanguage = 'en' | 'es' | 'fr' | 'pt' | 'ru' | 'de' | 'tr' | 'fil' | 'fa' | 'ar' | 'ur' | 'it' | 'ja' | 'zh' | 'zh-tw' | 'ko' | 'id' | 'nl' | 'hi' | 'bn' | 'sq' | 'vi' | 'th' | 'ne';
 
 /** Filipino intentionally uses the English sample data as its reviewed exception. */
-export const ENGLISH_IDENTICAL_SEED_LANGUAGES = ['fil'] as const;
+export const ENGLISH_IDENTICAL_SEED_LANGUAGES = [] as const;
 
 function resolveSeedLanguage(language?: string): SeedLanguage {
-  return language === 'es' || language === 'fr' || language === 'pt' || language === 'ru' || language === 'de'
-    || language === 'tr' || language === 'fil' || language === 'fa' || language === 'ar' || language === 'ur' || language === 'it'
-    || language === 'ja' || language === 'zh' || language === 'zh-tw' || language === 'ko' || language === 'id' || language === 'nl'
-    || language === 'hi' || language === 'bn' || language === 'sq' || language === 'vi' || language === 'th'
-    || language === 'ne'
-    ? language
-    : 'en';
+  // FloCafe UI is restricted to English and Persian. Any other locale request
+  // falls back to English so seed data never presents a removed language as the
+  // tenant's default. The broad SeedLanguage union below is retained so the
+  // existing sample-data maps and per-language product-name chains keep their
+  // (now-dead) branches type-safe; resolveSeedLanguage is the only gate that
+  // decides the actual seeded language.
+  return language === 'en' || language === 'fa' ? language : 'en';
 }
 
 function seedExpressRestaurant(db: ReturnType<typeof getDatabase>, serviceModel: string, language?: string): void {

@@ -276,19 +276,9 @@ async function runTests() {
     },
   };
 
-  const receiptLanguages: Array<{ lang: 'en' | 'es' | 'fr' | 'pt' | 'ru' | 'fa' | 'ur' | 'ja' | 'hi' | 'ne' | 'sq' | 'th'; label: string; filePrefix: string }> = [
+  const receiptLanguages: Array<{ lang: 'en' | 'fa'; label: string; filePrefix: string }> = [
     { lang: 'en', label: 'English UI', filePrefix: 'receipt-argentina-english-ui' },
-    { lang: 'es', label: 'Spanish UI', filePrefix: 'receipt-argentina-spanish-ui' },
-    { lang: 'fr', label: 'French UI', filePrefix: 'receipt-argentina-french-ui' },
-    { lang: 'pt', label: 'Portuguese UI', filePrefix: 'receipt-argentina-portuguese-ui' },
-    { lang: 'ru', label: 'Russian UI', filePrefix: 'receipt-argentina-russian-ui' },
     { lang: 'fa', label: 'Persian UI', filePrefix: 'receipt-argentina-persian-ui' },
-    { lang: 'ur', label: 'Urdu UI', filePrefix: 'receipt-argentina-urdu-ui' },
-    { lang: 'ja', label: 'Japanese UI', filePrefix: 'receipt-argentina-japanese-ui' },
-    { lang: 'hi', label: 'Hindi UI', filePrefix: 'receipt-argentina-hindi-ui' },
-    { lang: 'ne', label: 'Nepali UI', filePrefix: 'receipt-argentina-nepali-ui' },
-    { lang: 'sq', label: 'Albanian UI', filePrefix: 'receipt-argentina-albanian-ui' },
-    { lang: 'th', label: 'Thai UI', filePrefix: 'receipt-argentina-thai-ui' },
   ];
 
   const receiptResults: Record<string, { html: string; htmlPath: string; pngPath: string }> = {};
@@ -320,33 +310,10 @@ async function runTests() {
         receiptHtml.includes('Bill #'),
         `Receipt in English UI must contain English labels`,
       );
-    } else if (lang === 'es') {
+    } else if (lang === 'fa') {
       assert.ok(
-        receiptHtml.includes('ago') || receiptHtml.includes('Factura'),
-        `Receipt in Spanish UI must contain Spanish labels and date`,
-      );
-    } else if (lang === 'sq') {
-      assert.ok(
-        receiptHtml.includes('Dëftesë nr.') || receiptHtml.includes('Nëntotali'),
-        `Receipt in Albanian UI must contain Albanian labels and date`,
-      );
-    } else if (lang === 'ur') {
-      assert.ok(
-        receiptHtml.includes('بل #') && receiptHtml.includes('کل رقم'),
-        `Receipt in Urdu UI must contain Urdu labels`,
-      );
-      assert.ok(
-        receiptHtml.includes('اگست') || receiptHtml.includes('ستمبر'),
-        `Receipt in Urdu UI must contain an Urdu month name`,
-      );
-    } else if (lang === 'ne') {
-      assert.ok(
-        receiptHtml.includes('बिल #') && receiptHtml.includes('कुल जम्मा'),
-        `Receipt in Nepali UI must contain Devanagari labels`,
-      );
-      assert.ok(
-        receiptHtml.includes('अगस्ट'),
-        `Receipt in Nepali UI must contain a Nepali month name, got: ${receiptHtml}`,
+        /[؀-ۿ]/.test(receiptHtml),
+        `Receipt in Persian UI must contain Persian script, got: ${receiptHtml}`,
       );
     }
 
@@ -567,7 +534,7 @@ async function runTests() {
   }
 
   assert.ok(ssrRenderedLocales['en'].includes('Aug'), 'React hook in English UI must render Aug');
-  assert.ok(ssrRenderedLocales['es'].includes('ago'), 'React hook in Spanish UI must render ago');
+  assert.ok(/[؀-ۿ]/.test(ssrRenderedLocales['fa']), 'React hook in Persian UI must render Persian script');
 
   // -------------------------------------------------------------------------
   // 5. Generate Master Visual Comparison Dashboard Artifact

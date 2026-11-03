@@ -270,7 +270,7 @@ export function generateBillHtml(
   });
   const base = document.direction.base;
   const dir = base;
-  const localeTag = LANGUAGES[lang]?.locale ?? lang;
+  const localeTag = LANGUAGES[lang]?.locale ?? 'en';
 
   const header = getBlock(document, 'business-header') as BusinessHeaderBlock | undefined;
   const meta = getBlock(document, 'document-meta') as DocumentMetaBlock | undefined;
@@ -347,7 +347,7 @@ export function generateBillHtml(
       <table>
         <tr>
           <td><strong>${escapeHtml(invoiceNumberLabel)}</strong> ${meta ? directionalValue(meta.invoiceNumber, base) : ''}</td>
-          <td class="text-end"><strong>${escapeHtml(L.date)}</strong> ${meta ? escapeHtml(formatReceiptDate(meta.timestamp.text, tenant, LANGUAGES[lang]?.locale ?? lang)) : ''}</td>
+          <td class="text-end"><strong>${escapeHtml(L.date)}</strong> ${meta ? escapeHtml(formatReceiptDate(meta.timestamp.text, tenant, LANGUAGES[lang]?.locale ?? 'en')) : ''}</td>
         </tr>
         ${meta?.table ? `<tr><td><strong>${escapeHtml(L.table)}</strong> ${escapeHtml(meta.table.name.text)}</td><td></td></tr>` : ''}
         ${customer?.heading ? `<tr><td colspan="2"><strong>${escapeHtml(customer.heading.primary)}</strong></td></tr>` : ''}

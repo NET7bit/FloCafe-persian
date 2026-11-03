@@ -74,7 +74,7 @@ async function run() {
 
   // #375: prime the shared locale cache so synchronous t() resolves the
   // on-demand bundles in this test process.
-  for (const lang of ['en', 'es', 'fr', 'pt', 'ru', 'fa', 'ur', 'it', 'ja', 'zh', 'zh-tw', 'ko', 'id', 'nl', 'hi', 'bn', 'sq', 'vi', 'th', 'ne'] as const) {
+  for (const lang of ['en', 'fa'] as const) {
     await i18n.loadLocaleMessages(lang);
   }
 
@@ -315,124 +315,6 @@ async function run() {
       enHtml.includes('Thank you for your visit!')
     );
     assert('EN currency displays $50.00', enHtml.includes('$50.00'));
-
-    // Spanish
-    const esTenant = {
-      business_name: 'Café Flo Madrid',
-      currency: 'EUR',
-      country: 'ES',
-      timezone: 'Europe/Madrid',
-    };
-    const esHtml = generateBillHtml(sampleEnBill, esTenant, { language: 'es', isReprint: true });
-    assert('ES receipt has lang="es" and dir="ltr"', esHtml.includes('<html lang="es" dir="ltr">'));
-    assert('ES labels are Spanish',
-      esHtml.includes('REIMPRESIÓN') &&
-      esHtml.includes('Comprobante #') &&
-      esHtml.includes('Total general') &&
-      esHtml.includes('¡Gracias por su visita!')
-    );
-
-    // French
-    const frTenant = {
-      business_name: 'Café Flo Paris',
-      currency: 'EUR',
-      country: 'FR',
-      timezone: 'Europe/Paris',
-    };
-    const frHtml = generateBillHtml(sampleEnBill, frTenant, { language: 'fr', isReprint: true });
-    assert('FR receipt has lang="fr-FR" and dir="ltr"', frHtml.includes('<html lang="fr-FR" dir="ltr">'));
-    assert('FR labels are French',
-      frHtml.includes('RÉIMPRESSION') &&
-      frHtml.includes('N° de facture') &&
-      frHtml.includes('Total général') &&
-      frHtml.includes('Merci de votre visite !')
-    );
-
-    // Portuguese
-    const ptTenant = {
-      business_name: 'Café Flo Lisboa',
-      currency: 'EUR',
-      country: 'PT',
-      timezone: 'Europe/Lisbon',
-    };
-    const ptHtml = generateBillHtml(sampleEnBill, ptTenant, { language: 'pt', isReprint: true });
-    assert('PT receipt has lang="pt-BR" and dir="ltr"', ptHtml.includes('<html lang="pt-BR" dir="ltr">'));
-    assert('PT labels are Portuguese',
-      ptHtml.includes('REIMPRESSÃO') &&
-      ptHtml.includes('Conta #') &&
-      ptHtml.includes('Total geral') &&
-      ptHtml.includes('Obrigado pela sua visita!')
-    );
-
-    // Urdu
-    const urTenant = {
-      business_name: 'Flo Cafe Lahore',
-      currency: 'PKR',
-      country: 'PK',
-      timezone: 'Asia/Karachi',
-    };
-    const urHtml = generateBillHtml(sampleEnBill, urTenant, { language: 'ur', isReprint: true });
-    assert('UR receipt has lang="ur-PK" and dir="rtl"', urHtml.includes('<html lang="ur-PK" dir="rtl">'));
-    assert('UR labels are Urdu',
-      urHtml.includes('دوبارہ پرنٹ') &&
-      urHtml.includes('بل #') &&
-      urHtml.includes('کل رقم') &&
-      urHtml.includes('آپ کے تشریف لانے کا شکریہ!')
-    );
-
-    const hiTenant = {
-      business_name: 'FloCafe Delhi',
-      currency: 'INR',
-      country: 'IN',
-      timezone: 'Asia/Kolkata',
-    };
-    const hiHtml = generateBillHtml(sampleEnBill, hiTenant, { language: 'hi', isReprint: true });
-    assert('HI receipt has lang="hi-IN" and dir="ltr"', hiHtml.includes('<html lang="hi-IN" dir="ltr">'));
-    assert('HI labels are Devanagari',
-      hiHtml.includes('पुनर्मुद्रण') &&
-      hiHtml.includes('बिल #') &&
-      hiHtml.includes('कुल योग') &&
-      hiHtml.includes('धन्यवाद!')
-    );
-
-    const sqTenant = {
-      business_name: 'FloCafe Tiranë',
-      currency: 'ALL',
-      country: 'AL',
-      timezone: 'Europe/Tirane',
-    };
-    const sqHtml = generateBillHtml(sampleEnBill, sqTenant, { language: 'sq', isReprint: true });
-    assert('SQ receipt has lang="sq-AL" and dir="ltr"', sqHtml.includes('<html lang="sq-AL" dir="ltr">'));
-    assert('SQ labels are Albanian',
-      sqHtml.includes('PRINTIM PËRSËRI') &&
-      sqHtml.includes('Dëftesë nr.') &&
-      sqHtml.includes('Totali i përgjithshëm') &&
-      sqHtml.includes('Faleminderit për vizitën!')
-    );
-
-    const neTenant = {
-      business_name: 'FloCafe Kathmandu',
-      currency: 'NPR',
-      country: 'NP',
-      timezone: 'Asia/Kathmandu',
-    };
-    const neHtml = generateBillHtml(sampleEnBill, neTenant, { language: 'ne', isReprint: true });
-    assert('NE receipt has lang="ne-NP" and dir="ltr"', neHtml.includes('<html lang="ne-NP" dir="ltr">'));
-    assert('NE labels are Devanagari',
-      neHtml.includes('पुनः छाप्नुहोस्') &&
-      neHtml.includes('बिल #') &&
-      neHtml.includes('कुल जम्मा') &&
-      neHtml.includes('तपाईंको भ्रमणको लागि धन्यवाद!')
-    );
-
-    // The browser receipt is the primary print path, and its body stack was
-    // extended per language by hand, so Bengali was the one merged locale left
-    // without a declared family here. Assert the families the order-slip and
-    // raster stacks already carry.
-    const bnHtml = generateBillHtml(sampleEnBill, { ...neTenant, currency: 'BDT', country: 'BD' }, { language: 'bn', isReprint: true });
-    assert('BN receipt declares the Bengali font families in the order-slip position',
-      bnHtml.includes("'Noto Naskh Arabic', 'Noto Sans Bengali', 'Vrinda', 'Bangla Sangam MN', 'Noto Sans Devanagari'")
-    );
   }
 
   console.log('\nTest Suite 6: Canonical semantic labels and unknown-language fallback');
@@ -798,76 +680,6 @@ async function run() {
         phone: '+1 212 736 3100',
         includeTaxId: true,
         taxRegistrationNumber: 'US-99-1234567',
-      }),
-    },
-    {
-      name: '06_spanish_receipt_reprint',
-      html: generateBillHtml({
-        ...testIranBill,
-        bill_number: 'COMP-ES-2045',
-        subtotal: 30.00,
-        tax_amount: 3.00,
-        total: 33.00,
-        paid_amount: 33.00,
-        payment_details: [{ method: 'cash', amount: 33.00, timestamp: '2026-08-17T14:35:00.000Z' }],
-        order: {
-          ...testIranOrder,
-          order_number: 'ORD-ES-2045',
-          customer: { id: 'c1', name: 'Carlos Ruiz', phone: '+34 612 345 678', country_code: '+34' },
-          table: { id: 't1', name: 'Mesa 7', capacity: 2, status: 'occupied', is_active: true },
-          items: [{
-            id: 1, order_id: 101, product_id: 'p1', product_name: 'Café con Leche', unit_price: 15.00,
-            quantity: 2, subtotal: 30.00, tax_amount: 3.00, total: 33.00, addons: null, special_instructions: null, status: 'served'
-          }],
-        },
-      }, {
-        business_name: 'Café Flo Madrid',
-        currency: 'EUR',
-        country: 'ES',
-        timezone: 'Europe/Madrid',
-      }, {
-        language: 'es',
-        paperSize: 'thermal80',
-        isReprint: true,
-        address: 'Calle Mayor 10, Madrid',
-        phone: '+34 91 123 4567',
-        includeTaxId: true,
-        taxRegistrationNumber: 'B-12345678',
-      }),
-    },
-    {
-      name: '07_portuguese_receipt_brazil',
-      html: generateBillHtml({
-        ...testIranBill,
-        bill_number: 'CONTA-PT-3001',
-        subtotal: 80.00,
-        tax_amount: 8.00,
-        total: 88.00,
-        paid_amount: 88.00,
-        payment_details: [{ method: 'wallet', amount: 88.00, timestamp: '2026-08-17T14:35:00.000Z' }],
-        order: {
-          ...testIranOrder,
-          order_number: 'ORD-PT-3001',
-          customer: { id: 'c1', name: 'Ana Silva', phone: '+55 11 98765 4321', country_code: '+55' },
-          table: { id: 't1', name: 'Mesa 2', capacity: 4, status: 'occupied', is_active: true },
-          items: [{
-            id: 1, order_id: 101, product_id: 'p1', product_name: 'Pão de Queijo', unit_price: 40.00,
-            quantity: 2, subtotal: 80.00, tax_amount: 8.00, total: 88.00, addons: null, special_instructions: null, status: 'served'
-          }],
-        },
-      }, {
-        business_name: 'FloCafe São Paulo',
-        currency: 'BRL',
-        country: 'BR',
-        timezone: 'America/Sao_Paulo',
-      }, {
-        language: 'pt',
-        paperSize: 'thermal80',
-        isReprint: true,
-        address: 'Av. Paulista 1000, São Paulo',
-        phone: '+55 11 3000 0000',
-        includeTaxId: true,
-        taxRegistrationNumber: '12.345.678/0001-90',
       }),
     },
   ];

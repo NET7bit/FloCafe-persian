@@ -111,18 +111,18 @@ assert.ok(valid.ok);
 assert.deepEqual(valid.policy, { primary: { mode: 'inherit' }, additional: [] });
 
 const fixedWithAdditional = parsePrintLanguagePolicy(
-  { primary: { mode: 'fixed', language: 'fa' }, additional: ['es'] },
+  { primary: { mode: 'fixed', language: 'fa' }, additional: ['en'] },
   FACTS,
 );
 assert.ok(fixedWithAdditional.ok);
-const fixedTaiwan = parsePrintLanguagePolicy(
-  { primary: { mode: 'fixed', language: 'zh-tw' }, additional: [] },
+const fixedEnglish = parsePrintLanguagePolicy(
+  { primary: { mode: 'fixed', language: 'en' }, additional: [] },
   FACTS,
 );
-assert.ok(fixedTaiwan.ok);
-assert.equal(fixedTaiwan.ok ? fixedTaiwan.policy.primary.mode : '', 'fixed');
+assert.ok(fixedEnglish.ok);
+assert.equal(fixedEnglish.ok ? fixedEnglish.policy.primary.mode : '', 'fixed');
 if (fixedWithAdditional.ok) {
-  assert.deepEqual(resolveReceiptLanguages(fixedWithAdditional.policy, 'en'), ['fa', 'es']);
+  assert.deepEqual(resolveReceiptLanguages(fixedWithAdditional.policy, 'en'), ['fa', 'en']);
 }
 
 const badCases: Array<[unknown, RegExp]> = [

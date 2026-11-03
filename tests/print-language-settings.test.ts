@@ -53,16 +53,16 @@ if (objectPayload.ok) {
 }
 
 const stringPayload = validateLanguagePolicySetting(BILL_LANGUAGE_POLICY_KEY,
-  '{"primary":{"mode":"fixed","language":"fa"},"additional":["es"]}');
+  '{"primary":{"mode":"fixed","language":"fa"},"additional":["en"]}');
 assert.ok(stringPayload.ok);
 if (stringPayload.ok) {
   const stored = JSON.parse(stringPayload.stored);
   assert.deepEqual(stored.primary, { mode: 'fixed', language: 'fa' });
-  assert.deepEqual(stored.additional, ['es']);
+  assert.deepEqual(stored.additional, ['en']);
 }
 
 const kotFixed = validateLanguagePolicySetting(KOT_LANGUAGE_POLICY_KEY,
-  '{"primary":{"mode":"fixed","language":"pt"},"additional":[]}');
+  '{"primary":{"mode":"fixed","language":"fa"},"additional":[]}');
 assert.ok(kotFixed.ok);
 const zFixed = validateLanguagePolicySetting(Z_REPORT_LANGUAGE_POLICY_KEY,
   '{"primary":{"mode":"fixed","language":"fa"},"additional":["en"]}');

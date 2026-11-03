@@ -69,13 +69,13 @@ async function run(): Promise<void> {
     plan: 'desktop',
     status: 'active',
     language: 'en',
-    bill_language_policy: JSON.stringify({ primary: { mode: 'fixed', language: 'de' }, additional: ['fa'] }),
-    kot_language_policy: JSON.stringify({ primary: { mode: 'fixed', language: 'tr' }, additional: [] }),
+    bill_language_policy: JSON.stringify({ primary: { mode: 'fixed', language: 'en' }, additional: ['fa'] }),
+    kot_language_policy: JSON.stringify({ primary: { mode: 'fixed', language: 'fa' }, additional: [] }),
   }, settings);
   assert.deepEqual(failed, [], 'authenticated print-policy locale warmup succeeds');
-  assert.equal(settings.state.billLanguagePolicy.primary.language, 'de', 'receipt policy is applied during bootstrap');
-  assert.equal(settings.state.kotLanguagePolicy.primary.language, 'tr', 'KOT policy is applied during bootstrap');
-  assert.ok(isLocaleLoaded('de') && isLocaleLoaded('fa') && isLocaleLoaded('tr'), 'selected print locales are loaded before bootstrap completes');
+  assert.equal(settings.state.billLanguagePolicy.primary.language, 'en', 'receipt policy is applied during bootstrap');
+  assert.equal(settings.state.kotLanguagePolicy.primary.language, 'fa', 'KOT policy is applied during bootstrap');
+  assert.ok(isLocaleLoaded('en') && isLocaleLoaded('fa'), 'selected print locales are loaded before bootstrap completes');
 
   await Promise.all(languages.map((language) => loadLocaleMessages(language)));
   for (const language of languages) {
