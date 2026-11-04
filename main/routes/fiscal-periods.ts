@@ -3,7 +3,7 @@
  * All routes are owner/manager; reopening additionally requires an owner PIN.
  */
 import { Router, Request, Response } from 'express';
-import { getDatabase, withTxn } from '../db';
+import { getDatabase } from '../db';
 import { requirePermission } from '../services/authorization';
 import { checkPinRateLimit } from './orders';
 import {

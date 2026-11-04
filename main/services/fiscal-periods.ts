@@ -8,7 +8,7 @@
 import { Database } from 'better-sqlite3';
 import { randomBytes } from 'crypto';
 import {
-  getDatabase, getSettingValue, now, withTxn, verifyPin,
+  getSettingValue, now, withTxn, verifyPin,
   localDateInTimezone, tenantBusinessDayStartTime, parseDbTimestamp,
 } from '../db';
 import { ROLE_ACCESS } from '../../shared/role-permissions';

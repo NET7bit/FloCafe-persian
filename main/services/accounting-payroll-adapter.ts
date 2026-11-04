@@ -20,10 +20,6 @@ function existingJournal(db: Database, sourceId: string): JournalRecord | undefi
     .get(sourceId) as JournalRecord | undefined;
 }
 
-function reversed(db: Database, journalId: string): boolean {
-  return Boolean(db.prepare('SELECT id FROM journal_entries WHERE reverses_journal_id = ?').get(journalId));
-}
-
 function amount(value: unknown): number | null {
   const result = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(result) && result > 0 ? Math.round(result * 100) / 100 : null;

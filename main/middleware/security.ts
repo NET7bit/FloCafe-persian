@@ -414,7 +414,7 @@ export const corsOptions = {
       const denied = new Error('Not allowed by CORS') as Error & { status?: number };
       denied.status = 403;
       callback(denied);
-    } catch (err) {
+    } catch {
       const invalid = new Error('Invalid origin format') as Error & { status?: number };
       invalid.status = 400;
       callback(invalid);

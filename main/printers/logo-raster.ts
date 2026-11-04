@@ -29,7 +29,6 @@ export function receiptLogoPath(userDataPath: string): string {
  */
 export function resolveUserDataPath(): string {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { app } = require('electron') as typeof import('electron');
     return app?.getPath?.('userData') ?? '';
   } catch {
@@ -89,7 +88,6 @@ export function loadReceiptLogo(userDataPath: string, cols: number): Buffer | nu
 
     // Loaded lazily so a test harness that mocks `electron` without
     // `nativeImage` still runs every other print path.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { nativeImage } = require('electron') as typeof import('electron');
     if (!nativeImage) return null;
 

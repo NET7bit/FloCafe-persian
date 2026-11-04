@@ -323,7 +323,7 @@ router.post('/tenants/select', (req: Request, res: Response) => {
       token_type: 'bearer',
       tenant,
     });
-  } catch (error: any) {
+  } catch {
     res.status(401).json({ error: 'Invalid token' });
   }
 });

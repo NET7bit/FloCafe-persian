@@ -1074,7 +1074,7 @@ function removeOlderReplacementJournals(journals: string[], dbPath: string, back
         throw new Error('invalid stale replacement journal');
       }
       removeReplacementArtifactsDurably(journalPath, journal.recoveryPath);
-    } catch (error) {
+    } catch {
       // Remove invalid stale journal and its snapshot without blocking startup.
       const fallbackRecovery = path.join(backupRoot, `${path.basename(journalPath, '.json')}.db`);
       removeReplacementArtifactsDurably(journalPath, fallbackRecovery);
@@ -1223,7 +1223,7 @@ export function initDatabase(recoverInterruptedReplacement = true, allowDuringSh
     const markerPath = getDbInitializedMarkerPath();
     try {
       fs.writeFileSync(markerPath, now());
-    } catch (err) {
+    } catch {
       // Retry writing marker once on transient filesystem errors.
       try {
         fs.writeFileSync(markerPath, now());
