@@ -220,7 +220,7 @@ router.post('/', requirePermission('tables.manage'), (req: Request, res: Respons
     }
 
     const tableId = `tbl-${randomUUID().slice(0, 8)}`;
-    const result = db.prepare(`
+    db.prepare(`
       INSERT INTO tables (id, number, capacity, floor, section, position_x, position_y, kitchen_station_id, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(

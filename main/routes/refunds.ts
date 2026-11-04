@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { Router, Request, Response } from 'express';
-import { getDatabase, now, withTxn } from '../db';
+import { getDatabase, withTxn } from '../db';
 import { requirePermission } from '../services/authorization';
 import { checkPinRateLimit } from './orders';
 import { createRefund, getTenantCurrency, RefundRequest } from '../services/refund';

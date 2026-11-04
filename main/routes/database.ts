@@ -433,7 +433,7 @@ router.post('/import', requirePermission('database.manage'),
       clearGoogleDriveRestoreBinding(db);
       db.exec('COMMIT');
       committed = true;
-      } catch (err: any) {
+      } catch (err) {
         // Roll back only when the transaction was not already committed. Once
         // COMMIT has succeeded there is nothing to roll back; a post-commit
         // error must not be turned into a failed import (see Y-1 Option A).
@@ -508,7 +508,7 @@ router.post('/import', requirePermission('database.manage'),
         console.error('[DB Import] Post-commit response emission failed (data is committed):', responseError);
       }
     }
-  } catch (error: any) {
+  } catch (error) {
       console.error('[DB Import] Error:', error);
       res.status(500).json({ error: 'Import failed' });
     }

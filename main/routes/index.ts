@@ -56,7 +56,6 @@ const OWNER_MANAGER_ROLE_PLACEHOLDERS = ROLE_ACCESS.ownerManager.map(() => '?').
 import {
   calculateConfiguredChargeTaxes,
   combineItemAndChargeTaxes,
-  getActiveCountryPack,
   invertTaxBreakdown,
   invertTaxSnapshot,
 } from '../services/tax';
@@ -279,7 +278,7 @@ export function registerRoutes(app: Express): void {
   // CRM lookup endpoint (frontend uses this)
   app.get('/api/crm/lookup', inlineCustomerLookupRateLimit, requirePermission('customers.view'), (req, res) => {
     try {
-      const { phone, country_code } = req.query;
+      const { phone } = req.query;
       if (!phone) {
         return res.status(400).json({ error: 'Phone number required' });
       }

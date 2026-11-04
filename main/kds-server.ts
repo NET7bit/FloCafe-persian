@@ -138,7 +138,7 @@ export function startKdsServer(): Promise<void> {
           iat: decoded.iat,
         } satisfies KdsRequestUser;
         next();
-      } catch (error) {
+      } catch {
         return res.status(401).json({ error: 'Invalid token' });
       }
     };
@@ -267,7 +267,7 @@ export function startKdsServer(): Promise<void> {
           authorization_revision: effectivePermissionRevision(row.id),
           },
         });
-      } catch (error: any) {
+      } catch {
         res.status(500).json({ error: 'Internal server error' });
       }
     });
@@ -409,7 +409,6 @@ export function startKdsServer(): Promise<void> {
         const kdsUser = (req as any).user as KdsRequestUser;
         const liveUser = db.prepare('SELECT role, category_ids, is_active FROM users WHERE id = ?').get(kdsUser.userId) as { role: string; category_ids: string | null; is_active: number } | undefined;
         if (!liveUser?.is_active) return res.status(403).json({ error: 'User account is not active' });
-        const categoryIds = categoryIdsForRole(liveUser.role, liveUser.category_ids);
         const stationIds = getUserKdsStationIds(db, kdsUser.userId);
         const stationAssignmentsConfigured = hasUserKdsStationAssignments(db, kdsUser.userId);
         if (!stationIds || stationAssignmentsConfigured === null) return res.status(403).json({ error: 'Could not load station permissions' });

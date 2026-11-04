@@ -220,7 +220,7 @@ router.post('/pairing', requirePermission('kitchen.pair'), (req: Request, res: R
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString().replace('T', ' ').replace(/\..*$/, '');
     const tokenId = randomUUID();
 
-    const result = db.prepare(`
+    db.prepare(`
       INSERT INTO kds_pairing_tokens (id, token, station_id, expires_at, created_at)
       VALUES (?, ?, ?, ?, ?)
     `).run(tokenId, token, station_id || null, expiresAt, now());
@@ -272,7 +272,7 @@ router.get('/display', requireKdsEnabled, (req: Request, res: Response) => {
       if (stationData.category_ids) {
         stationCategoryIds = parseCategoryIds(stationData.category_ids);
       }
-    } catch (e) {
+    } catch {
       stationCategoryIds = [];
     }
     if (
@@ -376,7 +376,6 @@ router.patch('/items/:id/status', requirePermission('kitchen.status.update'), re
     const stationCategoryIds = getKdsStationCategoryIds(db, userStationIds);
     const stationScope = getKdsStationRoutingScope(db, userStationIds, userCategoryIds);
     if (!stationCategoryIds || !stationScope) return res.status(403).json({ error: 'Could not load station permissions' });
-    const stationRoutingCategoryIds = stationScope.tablelessCategoryIds;
     let restrictedPayload = isRestrictedKdsPayload(req, userCategoryIds, userStationIds);
 
     const updatedItem = withTxn(() => {

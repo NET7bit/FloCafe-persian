@@ -2,14 +2,13 @@ import * as net from 'net';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { getDatabase, getSettingValue, parseDbTimestamp } from '../db';
 import {
   PrinterCutMode,
   resolvePrinterProfile,
   matchSupportedPrinterProfile,
-  getPrinterCapabilities,
   SupportedPrinterProfile,
   dotsForPaperWidth,
   capabilitiesForPrinter,
@@ -501,7 +500,7 @@ async function getMacOSPrinterDetails(name: string, signal?: AbortSignal): Promi
   return { make, model };
 }
 
-function extractEpsonModel(name: string, info: string): string {
+function extractEpsonModel(name: string, _info: string): string {
   const lower = name.toLowerCase();
   if (lower.includes('tm-m30')) return 'TM-m30';
   if (lower.includes('tm-t88')) return 'TM-T88';
@@ -827,7 +826,7 @@ export async function initPrinter(): Promise<void> {
     } else {
       console.log('[Printer] No default printer configured');
     }
-  } catch (error) {
+  } catch {
     console.log('[Printer] Printer initialization skipped (database not ready)');
   }
 }
@@ -1012,7 +1011,7 @@ export async function printDeliverySlip(
     }
 
     const { profile, columns: cols, capabilities } = resolvePrinterContext(printer, arabicShapingOverride);
-    const db = getDatabase();
+    getDatabase();
     // Key/value table: a `SELECT * LIMIT 1` row has no `country` property, so
     // reading it that way silently pins the slip date to en-US.
     const countryCode = getSettingValue('country') ?? '';
@@ -2334,10 +2333,6 @@ function zLayoutContext(columns: number, document: ZReportDocument, capabilities
   };
 }
 
-function zLabelVariants(label: SemanticLabel, columns: number): string[] {
-  return [...bilingualLabelLines(label, selectBilingualFit(label, columns))];
-}
-
 function zLaidOutLabel(label: SemanticLabel, context: ThermalLayoutContext): string[] {
   return [...layoutStyledUnit({ label, field: 'Z report label' }, context).lines];
 }
@@ -2412,7 +2407,7 @@ export async function printZReport(z: any, signal?: AbortSignal, targetPrinter?:
     // F3: resolve the printer's profile so `buildZReportBody` can use the
     // right columns and capabilities (58mm/36/42 cols, profile-specific
     // code pages, etc.). Same pattern as `prepareReceipt` (`:1043-1056`).
-    const { profile, columns, capabilities } = resolvePrinterContext(printer, false);
+    const { columns, capabilities } = resolvePrinterContext(printer, false);
     const zWithMarker = { ...z, __isReprint: !!z?.__isReprint };
     // The route carries the resolved Z-report language policy in the snapshot;
     // direct callers retain the English store-language default.
