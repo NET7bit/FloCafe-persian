@@ -764,7 +764,7 @@ export async function calculateTaxPreview(req: any, res: any): Promise<void> {
       // that the order endpoint then rejected.
       const addonInputs = Array.isArray(itemData.addons) ? itemData.addons : [];
       const hasIdlessAddon = addonInputs.some(
-        (addon: any) => addon && (typeof addon.id !== 'string' || addon.id.length === 0),
+        (addon: { id?: string }) => addon && (typeof addon.id !== 'string' || addon.id.length === 0),
       );
       if (hasIdlessAddon) {
         res.status(400).json({
@@ -776,9 +776,10 @@ export async function calculateTaxPreview(req: any, res: any): Promise<void> {
       let resolvedAddons: ReturnType<typeof resolveItemAddons>;
       try {
         resolvedAddons = resolveItemAddons(db, product.id, addonInputs);
-      } catch (addonError: any) {
+      } catch (addonError: unknown) {
         // The resolver's message names catalog entries; log it, answer generically.
-        console.warn('[TaxPreview] add-on resolution failed:', addonError?.message);
+        // The cast is type-only: it compiles back to the original optional chain.
+        console.warn('[TaxPreview] add-on resolution failed:', (addonError as { message?: unknown } | null | undefined)?.message);
         res.status(400).json({
           error: 'One or more add-ons are not available for this product',
           code: 'addon_invalid',

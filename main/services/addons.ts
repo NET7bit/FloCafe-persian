@@ -17,7 +17,7 @@ import type { getDatabase } from '../db';
 export function resolveItemAddons(
   db: ReturnType<typeof getDatabase>,
   productId: string,
-  addons: any[] | null | undefined,
+  addons: { id?: string; name?: string; price?: number; quantity?: number }[] | null | undefined,
 ): { id: string; name: string; price: number; quantity: number }[] {
   const addonInputs = Array.isArray(addons) ? addons : [];
 
@@ -74,7 +74,9 @@ export function resolveItemAddons(
   // Validate every group linked to the product, not just ones with a selection —
   // otherwise a required group (e.g. Size) can be silently skipped by omitting `addons`.
   for (const groupId of linkedGroupIds) {
-    const group = db.prepare('SELECT * FROM addon_groups WHERE id = ? AND is_active = 1').get(groupId) as any;
+    const group = db.prepare('SELECT * FROM addon_groups WHERE id = ? AND is_active = 1').get(groupId) as
+      | { name: string; is_required: number; min_selection: number | null; max_selection: number | null; allow_multiple_quantities: number }
+      | undefined;
     if (!group) continue;
     const selection = groupSelections.get(groupId) || { totalQty: 0, hasMultiQty: false };
 
