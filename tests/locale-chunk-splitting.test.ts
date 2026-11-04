@@ -15,7 +15,10 @@
  *
  * Requires `npm run build:frontend` output (`frontend/out`). Skips with
  * exit 0 when the build output is absent (e.g. `npm test` on a fresh
- * checkout without a preceding frontend build).
+ * checkout without a preceding frontend build). CI sets
+ * `REQUIRE_FRONTEND_BUILD=1` where the export is restored from an artifact,
+ * which turns that skip into a failure: a missing export there means the
+ * build or the restore broke, not that the developer never built.
  *
  * A locale source file that has no chunk in the output is only explained by
  * the build when the output predates that source file; that case gets its own
@@ -85,6 +88,13 @@ function decodeJavaScriptEscapes(value: string): string {
 function run(): void {
   const chunksDir = path.join(OUT, '_next', 'static', 'chunks');
   if (!fs.existsSync(chunksDir)) {
+    if (process.env.REQUIRE_FRONTEND_BUILD === '1') {
+      throw new Error(
+        'REQUIRE_FRONTEND_BUILD=1 but frontend/out/_next/static/chunks is missing — ' +
+        'the frontend build did not run, or its artifact was not restored into frontend/out. ' +
+        'Refusing to skip: this environment promised a build.',
+      );
+    }
     console.log('SKIP: frontend/out missing — run `npm run build:frontend` first (no locale chunk assertions).');
     return;
   }

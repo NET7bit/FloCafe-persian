@@ -57,6 +57,52 @@ jobs:
             uninstaller: ['scripts/uninstallers/**', 'tests/windows-uninstaller.Tests.ps1', 'tests/run-windows-uninstaller-tests.cjs', 'package.json', 'package-lock.json', '.github/workflows/ci.yml']
             docs: ['docs/**', '*.md', 'DOCUMENTATION.md', '.markdownlint-cli2.jsonc', 'scripts/docs/**', 'frontend/**/*.md', '.github/pull_request_template.md']
 
+  # 2b. Frontend Static Export
+  # The locale-chunk suite reads `frontend/out` and skips when it is absent, so
+  # the sharded test job needs an export that actually came from this commit.
+  # Building once here and handing the artifact to both shards keeps the export
+  # out of the shard's install path and avoids building it twice. The path
+  # filter deliberately mirrors `linux-tests`: the frontend graph also imports
+  # main/countries.ts through the `@countries` alias, so backend changes can
+  # move locale chunks too.
+  frontend-build:
+    name: Frontend Build (static export)
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.kds == 'true' || needs.changes.outputs.db == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend (static export)
+        run: cd frontend && npx cross-env NEXT_BUILD_MODE=desktop npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Upload static export
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-out
+          path: frontend/out
+          retention-days: 1
+          if-no-files-found: error
+
   # 3. Tax Safety Net
   # This deliberately runs independently of path filtering so every push to
   # main gets a visible status for the no-category-means-no-tax invariant.
@@ -142,7 +188,7 @@ jobs:
   # (scripts/ci/test-suites.json), so shard coverage cannot drift.
   linux-tests:
     name: Core Test Suite (Shard ${{ matrix.shard_number }}/2)
-    needs: changes
+    needs: [changes, frontend-build]
     if: ${{ needs.changes.outputs.frontend == 'true' || needs.changes.outputs.backend == 'true' || needs.changes.outputs.kds == 'true' || needs.changes.outputs.db == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -177,6 +223,18 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      # The locale-chunk suite asserts against the static export instead of
+      # skipping. Restoring the artifact from `frontend-build` keeps that
+      # assertion live without a second build in each shard.
+      - name: Restore frontend static export
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: frontend-out
+          path: frontend/out
+
+      - name: Verify static export restored
+        run: test -f frontend/out/index.html
+
       - name: Payment method split checks (npm pretest)
         if: matrix.shard == 0
         run: bash tests/run-test.sh npm run test:payment-methods-split
@@ -185,6 +243,10 @@ jobs:
         # The suite list is derived from package.json's "test" script at run
         # time, so shard coverage cannot drift from a hand-maintained list.
         run: xvfb-run -a --server-args='-screen 0 1280x800x24' env SHARD_TOTAL=2 SHARD_INDEX=${{ matrix.shard }} node scripts/ci/run-test-shard.cjs
+        env:
+          # The artifact above makes the export mandatory: a missing or
+          # unrestored build must fail here instead of skipping silently.
+          REQUIRE_FRONTEND_BUILD: '1'
 
   # 5. Playwright E2E
   e2e-playwright:
@@ -376,7 +438,7 @@ jobs:
   # tests/ci-required-checks.test.cjs pins this list; update both together.
   required-checks-gate:
     name: Required Checks Gate
-    needs: [changes, dependency-review, docs-checks, linux-baseline, linux-tests, tax-category-invariant, e2e-playwright, native-e2e-playwright, windows-uninstaller]
+    needs: [changes, frontend-build, dependency-review, docs-checks, linux-baseline, linux-tests, tax-category-invariant, e2e-playwright, native-e2e-playwright, windows-uninstaller]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -395,7 +457,7 @@ jobs:
           if [ "$changes_result" != "success" ]; then
             offenders="$changes_result"
           fi
-          for result in "${{ needs.dependency-review.result }}" "${{ needs.docs-checks.result }}" "${{ needs.linux-baseline.result }}" "${{ needs.linux-tests.result }}" "${{ needs.tax-category-invariant.result }}" "${{ needs.e2e-playwright.result }}" "${{ needs.native-e2e-playwright.result }}" "${{ needs.windows-uninstaller.result }}"; do
+          for result in "${{ needs.frontend-build.result }}" "${{ needs.dependency-review.result }}" "${{ needs.docs-checks.result }}" "${{ needs.linux-baseline.result }}" "${{ needs.linux-tests.result }}" "${{ needs.tax-category-invariant.result }}" "${{ needs.e2e-playwright.result }}" "${{ needs.native-e2e-playwright.result }}" "${{ needs.windows-uninstaller.result }}"; do
             if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
               offenders="$offenders $result"
             fi
