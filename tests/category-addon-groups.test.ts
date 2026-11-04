@@ -66,12 +66,24 @@ async function main() {
   const { baseUrl, server } = await startServer(app);
 
   try {
-    assert.equal(MIGRATIONS[MIGRATIONS.length - 1].version, 98, 'migration 98 is registered');
-    assert.equal(getCurrentSchemaVersion(), 98, 'fresh database applies migration 98');
+    // The schema keeps growing (it is well past v98 now), so the expected
+    // fresh-database version must come from the live registry tail, not from
+    // the version that happened to be latest when this suite was written.
+    const latestMigrationVersion = MIGRATIONS[MIGRATIONS.length - 1].version;
+    assert.equal(getCurrentSchemaVersion(), latestMigrationVersion, 'fresh database applies the latest registered migration');
+
+    // This suite specifically covers the migration that introduced the
+    // category_addon_groups join table; that identity stays explicit so all
+    // of its functional assertions below still run.
+    const CATEGORY_ADDON_GROUPS_MIGRATION = 98;
+    const categoryAddonGroupsMigration = MIGRATIONS.find(
+      (migration: any) => migration.version === CATEGORY_ADDON_GROUPS_MIGRATION,
+    );
+    assert.ok(categoryAddonGroupsMigration, 'migration 98 is registered');
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'category_addon_groups'").get());
     db.exec('DROP TABLE category_addon_groups');
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'category_addon_groups'").get(), undefined);
-    MIGRATIONS.find((migration: any) => migration.version === 98).up();
+    categoryAddonGroupsMigration.up();
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'category_addon_groups'").get(), 'migration 98 creates the join table for upgraded databases');
     assert.deepEqual(db.pragma('foreign_key_check'), [], 'category add-on group schema has no foreign-key violations');
 

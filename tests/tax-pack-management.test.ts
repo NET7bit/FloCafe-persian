@@ -54,6 +54,7 @@ const {
   formatReceipt,
 } = require('../main/printers/thermal');
 const { resolveTemplateLabel } = require('../main/print/template-labels');
+const { printLabel, PRINT_LABEL_LANGUAGES, isGeneratedPrintLanguage } = require('../main/print/print-labels.generated');
 const { LEGACY_TRUSTED_PACK_DIGESTS } = require('../main/routes/tax-packs');
 const dualRatePackData = require('./fixtures/synthetic-dual-rate-pack.json');
 const flatRatePackData = require('./fixtures/synthetic-flat-rate-pack.json');
@@ -1236,16 +1237,47 @@ async function main() {
     assert(fallbackEnReceipt.includes('Subtotal'), 'EN fallback subtotal matches the pre-#445 hardcoded default');
     assert(fallbackEnReceipt.includes('TOTAL'), 'EN fallback total matches the pre-#445 hardcoded default');
     assert(fallbackEnReceipt.includes('Thank you!'), 'EN fallback footer matches the pre-#445 hardcoded default');
-    const fallbackEsReceipt = renderLabeled('in.gst.label-fallback.v1', {}, 'es');
-    assert(fallbackEsReceipt.includes('FACTURA'), 'built-in fallbacks localize through the canonical catalog (es title)');
-    assert(fallbackEsReceipt.includes('Subtotal'), 'built-in fallbacks localize through the canonical catalog (es subtotal)');
-    // The legacy unsupported-script filter drops non-ASCII footer lines
-    // ("¡Gracias!") before they reach the printer, so the localized-footer
-    // assertion uses the ASCII-safe pt catalog entry instead.
-    const fallbackPtReceipt = renderLabeled('in.gst.label-fallback.v1', {}, 'pt');
-    assert(fallbackPtReceipt.includes('Obrigado!'), 'built-in fallbacks localize through the canonical catalog (pt footer)');
-    const fallbackUnknownLangReceipt = renderLabeled('in.gst.label-fallback.v1', {}, 'xx');
-    assert(fallbackUnknownLangReceipt.includes('INVOICE'), 'unknown receipt languages fall back to the EN catalog');
+    // #c0c5fce4 reduced the shipped print-label catalogs to exactly en and fa.
+    // Every other language (including the removed es/pt/fr) resolves through
+    // normalizePrintLanguage() to the English built-in fallback. The former
+    // es/pt localized-label expectations therefore become: a distinct fa
+    // catalog, a fa-specific render path, and byte-identical EN output for
+    // every unregistered language. Coverage is widened, not weakened: each
+    // removed-language case now checks the entire receipt plus all four EN
+    // fallback labels instead of a single substring.
+    assertEqual(PRINT_LABEL_LANGUAGES.join(','), 'en,fa', 'canonical print-label catalog ships exactly en and fa');
+    assert(
+      isGeneratedPrintLanguage('en') && isGeneratedPrintLanguage('fa')
+      && !isGeneratedPrintLanguage('es') && !isGeneratedPrintLanguage('pt') && !isGeneratedPrintLanguage('fr'),
+      'en/fa are registered print languages; es/pt/fr are not',
+    );
+    assert(
+      printLabel('fa', 'print.invoiceTitle') !== printLabel('en', 'print.invoiceTitle')
+      && printLabel('fa', 'print.grandTotal') !== printLabel('en', 'print.grandTotal'),
+      'the fa catalog carries its own invoice and grand-total labels',
+    );
+    assertEqual(
+      printLabel('es', 'print.invoiceTitle'), printLabel('en', 'print.invoiceTitle'),
+      'removed locale es resolves through the EN catalog',
+    );
+    assertEqual(
+      printLabel('pt', 'print.invoiceTitle'), printLabel('en', 'print.invoiceTitle'),
+      'removed locale pt resolves through the EN catalog',
+    );
+
+    const fallbackFaReceipt = renderLabeled('in.gst.label-fallback.v1', {}, 'fa');
+    assert(fallbackFaReceipt !== fallbackEnReceipt, 'fa is routed through its own catalog, never the EN fallback');
+
+    for (const removedLanguage of ['es', 'pt', 'fr', 'xx'] as const) {
+      const fallbackReceipt = renderLabeled('in.gst.label-fallback.v1', {}, removedLanguage);
+      assertEqual(fallbackReceipt, fallbackEnReceipt,
+        `unregistered language ${removedLanguage} renders byte-identical EN fallback output`);
+      assert(
+        fallbackReceipt.includes('INVOICE') && fallbackReceipt.includes('Subtotal')
+        && fallbackReceipt.includes('TOTAL') && fallbackReceipt.includes('Thank you!'),
+        `unregistered language ${removedLanguage} retains all four EN fallback labels`,
+      );
+    }
 
     // #445 review F1: reserved printer tokens in pack labels must never be
     // executed by the receipt builder — one regression per token ({CUT},

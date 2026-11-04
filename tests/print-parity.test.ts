@@ -966,12 +966,15 @@ function run(): void {
   warn(typedKotText.includes('Type: Dine in'), 'kot-document/order-type: localized order type rendered when present');
 
   // ------------------------------------------------------------------
-  // 5. Receipt/KOT language routing (#443): fa/es/fr tenants get localized
-  //    labels end-to-end through the resolved policy; the KOT kitchen
-  //    policy resolves independently of the receipt language.
+  // 5. Receipt/KOT language routing (#443) under the current 2-locale
+  //    contract (#c0c5fce4): only en and fa ship catalogs. Removed locales
+  //    (es/pt/fr) and unknown tags resolve through the English fallback.
+  //    The KOT kitchen policy still resolves independently of the receipt
+  //    language. Coverage of transport, localized labels, refusal and
+  //    financial warnings is retained with contract-correct expectations.
   // ------------------------------------------------------------------
   section('Localized receipt labels end-to-end');
-  for (const language of ['fa', 'es', 'fr'] as const) {
+  for (const language of ['en', 'fa'] as const) {
     for (const template of ['classic', 'compact'] as const) {
       const label = `${template}/${language}`;
       const warnings: Warnings = [];
@@ -980,15 +983,42 @@ function run(): void {
         formatReceipt(order, bill, business, template, 42, false, false, 'full', warnings, true, language),
       );
       const totalLabel = printLabel(language, 'print.grandTotal');
-      if (language === 'fr') {
-        warn(text.length === 0, `${label}: unsupported accented financial labels refuse before transport`);
-        warn(warnings.some((warning) => warning.kind === 'financial'), `${label}: refusal identifies the accented financial label`);
-        continue;
-      }
-      warn(text.includes(totalLabel), `${label}: grand-total label localized (${totalLabel})`);
       const subtotalLabel = printLabel(language, 'pos.subtotal');
+      warn(text.length > 0, `${label}: registered language transports a receipt`);
+      warn(text.includes(totalLabel), `${label}: grand-total label localized (${totalLabel})`);
       warn(text.includes(subtotalLabel), `${label}: subtotal label localized (${subtotalLabel})`);
+      warn(!warnings.some((warning) => warning.kind === 'financial'), `${label}: representable financial labels raise no refusal`);
     }
+  }
+
+  section('Unregistered receipt languages fall back to English');
+  for (const language of ['es', 'pt', 'fr', 'xx'] as const) {
+    for (const template of ['classic', 'compact'] as const) {
+      const label = `${template}/${language}`;
+      const warnings: Warnings = [];
+      const text = escPosToText(
+        formatReceipt(order, bill, business, template, 42, false, false, 'full', warnings, true, language),
+      );
+      warn(text.length > 0, `${label}: unregistered language transports a receipt`);
+      warn(text.includes(printLabel('en', 'print.grandTotal')), `${label}: EN fallback grand-total label rendered`);
+      warn(text.includes(printLabel('en', 'pos.subtotal')), `${label}: EN fallback subtotal label rendered`);
+      warn(!warnings.some((warning) => warning.kind === 'financial'), `${label}: EN fallback raises no financial refusal`);
+    }
+  }
+
+  // Refusal coverage under the current contract: Persian financial labels are
+  // unrepresentable on a non-shaping profile, so the backend must refuse
+  // before transport and identify the reason as financial. This replaces the
+  // old fr accented-label refusal case, which no longer has a locale catalog.
+  section('Unsupported financial labels refuse before transport');
+  for (const template of ['classic', 'compact'] as const) {
+    const label = `${template}/fa-no-shaping`;
+    const warnings: Warnings = [];
+    const text = escPosToText(
+      formatReceipt(order, bill, business, template, 42, false, false, 'full', warnings, false, 'fa'),
+    );
+    warn(text.length === 0, `${label}: unsupported Persian financial labels refuse before transport`);
+    warn(warnings.some((warning) => warning.kind === 'financial'), `${label}: refusal identifies the unsupported financial label`);
   }
 
   section('KOT language policy independence');
