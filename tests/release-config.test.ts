@@ -1035,6 +1035,50 @@ cat "$CI_TEST_RUNS_FIXTURE"
   assert.ok(evidenceUpload, 'CI must upload release regression evidence');
   assert.equal(evidenceUpload.with.path, '${{ runner.temp }}/flocafe-release-regressions/');
 
+  // The locale-chunk suite lives in the shard manifest but skips when
+  // `frontend/out` is absent, so without a build it asserts nothing. These
+  // assertions pin the wiring that makes the export exist before the shard
+  // runs and makes its absence a failure instead of a silent skip.
+  const frontendBuildJob = ciWorkflow.jobs['frontend-build'];
+  assert.ok(frontendBuildJob, 'CI must define a dedicated frontend-build job');
+  assert.equal(frontendBuildJob.needs, 'changes', 'frontend-build must depend on the path-filter job');
+  const buildExportStep = findStep(frontendBuildJob, 'Build frontend (static export)');
+  assertShellStep(frontendBuildJob, 'Build frontend (static export)');
+  assert.match(
+    buildExportStep.run,
+    /NEXT_BUILD_MODE=desktop/,
+    'the build must produce the desktop static export that frontend/out holds',
+  );
+  const exportUpload = (frontendBuildJob.steps || []).find((step: any) => step.with?.name === 'frontend-out');
+  assert.ok(exportUpload, 'frontend-build must upload the static export as frontend-out');
+  assert.equal(exportUpload.with.path, 'frontend/out');
+  assert.equal(exportUpload.with['if-no-files-found'], 'error');
+
+  const shardJob = ciWorkflow.jobs['linux-tests'];
+  assert.ok(
+    (shardJob.needs || []).includes('frontend-build'),
+    'the sharded test job must wait for the export it asserts against',
+  );
+  assert.equal(
+    shardJob.if,
+    frontendBuildJob.if,
+    'frontend-build and linux-tests must share one path filter, or the artifact can be missing while tests run',
+  );
+  const exportDownload = findStep(shardJob, 'Restore frontend static export');
+  assert.equal(exportDownload.with?.name, 'frontend-out');
+  assert.equal(exportDownload.with?.path, 'frontend/out');
+  const shardStepName = 'Core test suite (shard ${{ matrix.shard }})';
+  const shardStepNames = (shardJob.steps || []).map((step: any) => step.name);
+  assert.ok(
+    shardStepNames.indexOf('Restore frontend static export') < shardStepNames.indexOf(shardStepName),
+    'the export must be restored before the shard runs the manifest',
+  );
+  assert.equal(
+    findStep(shardJob, shardStepName).env.REQUIRE_FRONTEND_BUILD,
+    '1',
+    'the shard must fail, not skip, when the restored export is missing',
+  );
+
   const metaFilePath = path.join(__dirname, '../assets/com.flo.desktop.metainfo.xml');
   const originalMetaContent = fs.readFileSync(metaFilePath, 'utf8');
   const testNotesPath = path.join(os.tmpdir(), `flocafe-release-notes-${Date.now()}.md`);
