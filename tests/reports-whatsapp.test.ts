@@ -175,8 +175,11 @@ async function main(): Promise<void> {
     assert.ok(frenchMessage.includes(frenchAmount), 'formats tenant currency using the selected locale');
 
     const messageDir = path.join(__dirname, '../frontend/src/lib/i18n/messages');
-    const localeFiles = fs.readdirSync(messageDir).filter((file) => file.endsWith('.json'));
-    assert.equal(localeFiles.length, 24, 'the full-report localization test covers all supported locales');
+    const localeFiles = fs.readdirSync(messageDir).filter((file) => file.endsWith('.json')).sort();
+    // #c0c5fce4 restricted the shipped catalogs to exactly en and fa. Assert
+    // the exact set (not just a count) so a removed locale cannot silently
+    // return and a newly shipped one cannot skip the coverage loop below.
+    assert.deepEqual(localeFiles, ['en.json', 'fa.json'], 'the full-report localization test covers all supported locales');
     for (const localeFile of localeFiles) {
       const labels = getLocalizedLabels(localeFile);
       const localizedX = formatCashCloseWhatsAppMessage(reportBase, tenant, 'en-US', labels);
@@ -211,7 +214,7 @@ async function main(): Promise<void> {
     const customPaymentMessage = formatCashCloseWhatsAppMessage({
       ...reportBase,
       paymentMethods: [{ method: 'Loyalty Wallet', count: 1, total: 100 }],
-    }, tenant, 'en-US', getLocalizedLabels('fr.json'));
+    }, tenant, 'en-US', getLocalizedLabels('fa.json'));
     assert.match(customPaymentMessage, /Loyalty Wallet:/, 'custom payment method names remain unchanged');
 
     const owner = testSetup.seedOwnerUser(testSetup.initTestDb());

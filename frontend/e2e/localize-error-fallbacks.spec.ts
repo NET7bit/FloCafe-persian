@@ -10,8 +10,9 @@ import { E2E_BASE_URL as BASE } from './helpers/urls';
  * Verifies that when backend endpoints fail (e.g. returning 400, 429, 500 with
  * English error messages or SQL exceptions), the frontend UI never interpolates
  * or leaks raw English backend strings to the customer. Instead, it renders
- * the localized `t()` fallback string according to the active language (tested
- * in Persian 'fa', Spanish 'es', Portuguese 'pt', and English 'en').
+ * the localized `t()` fallback string according to the active language. The
+ * released contract ships only English ('en') and Persian ('fa'); removed
+ * locales ('es', 'fr', 'pt') must resolve through the English fallback.
  *
  * Captures reviewer-visible visual evidence (screenshots of localized error
  * toasts and inline error states) into the evidence directory.
@@ -76,7 +77,7 @@ async function setPosSetting(page: Page, key: string, value: boolean | string): 
 }
 
 test.describe('Localized Error Fallbacks', () => {
-  test('Login failure renders localized fallback across all 5 locales (EN, ES, FR, PT, FA)', async ({ page }) => {
+  test('Login failure renders the localized fallback in EN/FA and the English fallback for removed locales (ES, FR, PT)', async ({ page }) => {
     await page.route('**/api/auth/login', (route) => {
       route.fulfill({
         status: 500,
@@ -94,7 +95,9 @@ test.describe('Localized Error Fallbacks', () => {
     await expect(page.locator('text=RAW_SQLITE_INTERNAL_DB_FATAL_ERROR')).not.toBeVisible();
     await captureScreenshot(page, 'error-login-fallback-en.png');
 
-    // 2. Spanish (es)
+    // 2. Removed Spanish (es) -> English fallback. Keep the removed tag in
+    //    storage so the fallback path is exercised, and assert both that the
+    //    English fallback appears and that no removed-locale text leaks.
     await page.addInitScript(() => {
       localStorage.setItem('pos-settings', JSON.stringify({ state: { language: 'es' }, version: 3 }));
     });
@@ -102,11 +105,12 @@ test.describe('Localized Error Fallbacks', () => {
     await page.locator('#email').fill('manager@flo.local');
     await page.locator('#password').fill('WrongPassword!');
     await page.locator('button[type="submit"]').click();
-    await expect(page.locator('text=No se pudo iniciar sesión')).toBeVisible();
+    await expect(page.locator('text=Login failed')).toBeVisible();
+    await expect(page.locator('text=No se pudo iniciar sesión')).toHaveCount(0);
     await expect(page.locator('text=RAW_SQLITE_INTERNAL_DB_FATAL_ERROR')).not.toBeVisible();
-    await captureScreenshot(page, 'error-login-fallback-es.png');
+    await captureScreenshot(page, 'error-login-fallback-es-en.png');
 
-    // 3. French (fr)
+    // 3. Removed French (fr) -> English fallback
     await page.addInitScript(() => {
       localStorage.setItem('pos-settings', JSON.stringify({ state: { language: 'fr' }, version: 3 }));
     });
@@ -114,11 +118,12 @@ test.describe('Localized Error Fallbacks', () => {
     await page.locator('#email').fill('manager@flo.local');
     await page.locator('#password').fill('WrongPassword!');
     await page.locator('button[type="submit"]').click();
-    await expect(page.locator('text=Échec de la connexion')).toBeVisible();
+    await expect(page.locator('text=Login failed')).toBeVisible();
+    await expect(page.locator('text=Échec de la connexion')).toHaveCount(0);
     await expect(page.locator('text=RAW_SQLITE_INTERNAL_DB_FATAL_ERROR')).not.toBeVisible();
-    await captureScreenshot(page, 'error-login-fallback-fr.png');
+    await captureScreenshot(page, 'error-login-fallback-fr-en.png');
 
-    // 4. Portuguese (pt)
+    // 4. Removed Portuguese (pt) -> English fallback
     await page.addInitScript(() => {
       localStorage.setItem('pos-settings', JSON.stringify({ state: { language: 'pt' }, version: 3 }));
     });
@@ -126,9 +131,10 @@ test.describe('Localized Error Fallbacks', () => {
     await page.locator('#email').fill('manager@flo.local');
     await page.locator('#password').fill('WrongPassword!');
     await page.locator('button[type="submit"]').click();
-    await expect(page.locator('text=Falha no login')).toBeVisible();
+    await expect(page.locator('text=Login failed')).toBeVisible();
+    await expect(page.locator('text=Falha no login')).toHaveCount(0);
     await expect(page.locator('text=RAW_SQLITE_INTERNAL_DB_FATAL_ERROR')).not.toBeVisible();
-    await captureScreenshot(page, 'error-login-fallback-pt.png');
+    await captureScreenshot(page, 'error-login-fallback-pt-en.png');
 
     // 5. Persian (fa)
     await page.addInitScript(() => {
@@ -166,7 +172,7 @@ test.describe('Localized Error Fallbacks', () => {
     await captureScreenshot(page, 'error-login-lockout-fa.png');
   });
 
-  test('Password recovery failure renders localized fallback across locales (EN, ES, FA)', async ({ page }) => {
+  test('Password recovery failure renders the localized fallback in EN/FA and the English fallback for removed ES', async ({ page }) => {
     await page.route('**/api/auth/setup/status', (route) => {
       route.fulfill({
         status: 200,
@@ -194,7 +200,8 @@ test.describe('Localized Error Fallbacks', () => {
     await expect(page.locator('text=RAW_VERIFICATION_TOKEN_MISMATCH_EXCEPTION')).not.toBeVisible();
     await captureScreenshot(page, 'error-recover-pin-fallback-en.png');
 
-    // 2. Spanish recover error
+    // 2. Removed Spanish (es) -> English fallback. The raw exception must
+    //    still never leak, and no removed-locale text may be rendered.
     await page.addInitScript(() => {
       localStorage.setItem('pos-settings', JSON.stringify({ state: { language: 'es' }, version: 3 }));
     });
@@ -205,9 +212,10 @@ test.describe('Localized Error Fallbacks', () => {
     await page.locator('#confirm-new-password').fill('NewPass123!');
     await page.locator('button[type="submit"]').click();
 
-    await expect(page.locator('text=No se pudo recuperar el acceso')).toBeVisible();
+    await expect(page.locator('text=Recovery failed')).toBeVisible();
+    await expect(page.locator('text=No se pudo recuperar el acceso')).toHaveCount(0);
     await expect(page.locator('text=RAW_VERIFICATION_TOKEN_MISMATCH_EXCEPTION')).not.toBeVisible();
-    await captureScreenshot(page, 'error-recover-pin-fallback-es.png');
+    await captureScreenshot(page, 'error-recover-pin-fallback-es-en.png');
 
     // 3. Persian recover error
     await page.addInitScript(() => {

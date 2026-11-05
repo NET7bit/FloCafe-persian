@@ -45,12 +45,45 @@ function runTest() {
     'i18n:add must explain why an existing language file was not overwritten',
   );
 
-  const regionalLanguage = spawnSync(process.execPath, [i18nAddScript, 'zh-tw'], {
-    encoding: 'utf8',
-    cwd: rootDir,
-  });
-  assert.strictEqual(regionalLanguage.status, 1, 'i18n:add must accept a regional key before refusing an existing file');
-  assert.doesNotMatch(regionalLanguage.stderr, /Invalid language code/, 'i18n:add must accept a canonical lowercase regional key');
+  // #c0c5fce4 restricted the shipped catalogs to exactly en and fa, so a
+  // canonical regional key such as `zh-tw` no longer names an existing file:
+  // the helper now scaffolds a fresh catalog instead of refusing to overwrite
+  // one. Keep both behaviours under test in an isolated fixture, so this probe
+  // can never resurrect a removed locale inside the repository.
+  const shippedLocales = fs.readdirSync(path.join(rootDir, 'frontend/src/lib/i18n/messages'))
+    .filter((file: string) => file.endsWith('.json')).sort();
+  assert.deepStrictEqual(shippedLocales, ['en.json', 'fa.json'], 'only the supported en/fa catalogs ship');
+
+  const i18nFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'flo-i18n-add-'));
+  try {
+    const fixtureScripts = path.join(i18nFixture, 'scripts');
+    const fixtureMessages = path.join(i18nFixture, 'frontend', 'src', 'lib', 'i18n', 'messages');
+    mkdirp(fixtureScripts);
+    mkdirp(fixtureMessages);
+    fs.copyFileSync(i18nAddScript, path.join(fixtureScripts, 'i18n-add.cjs'));
+    fs.copyFileSync(
+      path.join(rootDir, 'frontend/src/lib/i18n/messages/en.json'),
+      path.join(fixtureMessages, 'en.json'),
+    );
+    const fixtureScript = path.join(fixtureScripts, 'i18n-add.cjs');
+
+    const regionalLanguage = spawnSync(process.execPath, [fixtureScript, 'zh-tw'], {
+      encoding: 'utf8',
+      cwd: i18nFixture,
+    });
+    assert.strictEqual(regionalLanguage.status, 0, 'i18n:add accepts a canonical lowercase regional key');
+    assert.doesNotMatch(regionalLanguage.stderr, /Invalid language code/, 'i18n:add must accept a canonical lowercase regional key');
+    assert.ok(fs.existsSync(path.join(fixtureMessages, 'zh-tw.json')), 'i18n:add scaffolds the regional catalog from English');
+
+    const existingRegional = spawnSync(process.execPath, [fixtureScript, 'zh-tw'], {
+      encoding: 'utf8',
+      cwd: i18nFixture,
+    });
+    assert.strictEqual(existingRegional.status, 1, 'i18n:add refuses to overwrite an existing regional catalog');
+    assert.match(existingRegional.stderr, /Refusing to overwrite existing messages file/, 'i18n:add explains the no-overwrite refusal');
+  } finally {
+    fs.rmSync(i18nFixture, { recursive: true, force: true });
+  }
 
   const invalidLanguage = spawnSync(process.execPath, [i18nAddScript, 'EN'], {
     encoding: 'utf8',

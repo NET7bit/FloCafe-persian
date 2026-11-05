@@ -19,7 +19,7 @@ async function login(page: Page, email: string): Promise<void> {
 }
 
 test.describe('Batch 5E Migrated Pages & Components E2E Validation', () => {
-  test('Batch 5E Pages render correctly in English, Spanish, and Persian with useTranslations and valid leaf keys', async ({ page }) => {
+  test('Batch 5E Pages render correctly in English and Persian, with removed locales falling back to English', async ({ page }) => {
     await login(page, 'owner@flo.local');
 
     // ==========================================
@@ -88,52 +88,73 @@ test.describe('Batch 5E Migrated Pages & Components E2E Validation', () => {
     await captureScreenshot(page, 'batch-5e-print-test-en.png');
 
     // ==========================================
-    // 2. SPANISH (ES)
+    // 2. REMOVED LOCALE (ES) -> ENGLISH FALLBACK
     // ==========================================
+    // #c0c5fce4 ships only en and fa catalogs. A stored `es` preference is
+    // unregistered, so I18nProvider must resolve it through the English
+    // fallback. Every page below is still asserted (heading + direction +
+    // evidence screenshot), now with the contract-correct English labels,
+    // plus an explicit assertion that no removed-locale text leaks through.
     await setLanguage(page, 'es');
 
-    // 2a. Settings (ES)
+    // 2a. Settings (ES -> EN fallback)
     await page.goto(`${BASE}/settings`);
     await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Configuración');
-    await expect(page.getByText('Datos del Negocio').first()).toBeVisible();
-    await captureScreenshot(page, 'batch-5e-settings-es.png');
+    await expect(page.getByText('Configuración', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Datos del Negocio', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Settings');
+    await expect(page.getByText('Store Details').first()).toBeVisible();
+    await captureScreenshot(page, 'batch-5e-settings-es-fallback.png');
 
-    // 2b. Products (ES)
+    // 2b. Products (ES -> EN fallback)
     await page.goto(`${BASE}/products`);
     await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Productos');
-    await captureScreenshot(page, 'batch-5e-products-es.png');
+    await expect(page.getByText('Configuración', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Productos', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Products');
+    await captureScreenshot(page, 'batch-5e-products-es-fallback.png');
 
-    // 2c. Addon Groups (ES)
+    // 2c. Addon Groups (ES -> EN fallback)
     await page.goto(`${BASE}/addon-groups`);
     await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Grupos de adicionales');
-    await captureScreenshot(page, 'batch-5e-addon-groups-es.png');
+    await expect(page.getByText('Configuración', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Grupos de adicionales', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Addon Groups');
+    await captureScreenshot(page, 'batch-5e-addon-groups-es-fallback.png');
 
-    // 2d. Staff (ES)
+    // 2d. Staff (ES -> EN fallback)
     await page.goto(`${BASE}/staff`);
     await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Personal');
-    await captureScreenshot(page, 'batch-5e-staff-es.png');
+    await expect(page.getByText('Configuración', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Personal', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Staff');
+    await captureScreenshot(page, 'batch-5e-staff-es-fallback.png');
 
-    // 2e. Support (ES)
+    // 2e. Support (ES -> EN fallback)
     await page.goto(`${BASE}/support`);
     await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Ayuda y soporte');
-    await captureScreenshot(page, 'batch-5e-support-es.png');
+    await expect(page.getByText('Configuración', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Ayuda y soporte', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Help & Support');
+    await captureScreenshot(page, 'batch-5e-support-es-fallback.png');
 
-    // 2f. WhatsApp (ES)
+    // 2f. WhatsApp (ES -> EN fallback). The ES catalog used the same
+    // "WhatsApp" heading as EN, so assert the direction, the EN heading and
+    // the absence of a removed-locale label instead of a duplicate text hit.
     await page.goto(`${BASE}/whatsapp`);
     await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
+    await expect(page.getByText('Configuración', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Datos del Negocio', { exact: true })).toHaveCount(0);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('WhatsApp');
-    await captureScreenshot(page, 'batch-5e-whatsapp-es.png');
+    await captureScreenshot(page, 'batch-5e-whatsapp-es-fallback.png');
 
-    // 2g. Print Test (ES)
+    // 2g. Print Test (ES -> EN fallback)
     await page.goto(`${BASE}/print-test`);
     await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Página de prueba de impresión');
-    await captureScreenshot(page, 'batch-5e-print-test-es.png');
+    await expect(page.getByText('Configuración', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Página de prueba de impresión', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Printing Test Page');
+    await captureScreenshot(page, 'batch-5e-print-test-es-fallback.png');
 
     // ==========================================
     // 3. PERSIAN (FA) RTL

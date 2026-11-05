@@ -255,18 +255,22 @@ test('settings renders RTL without horizontal overflow, mirrors toggles and tabs
       (page.viewportSize()?.width ?? 0) / 2
     );
 
-    // Verify language dropdown in Settings offers all selectable languages.
+    // #c0c5fce4 reduced the shipped catalogs to exactly en and fa. The
+    // settings dropdown is registry-derived, so it must offer both supported
+    // languages and none of the removed ones. Kept as strict as the original
+    // seven-locale check (and stricter: exact count + explicit exclusions).
     const languageSelect = page.locator('select').filter({ has: page.locator('option[value="en"]') }).first();
     await expect(languageSelect).toBeVisible();
     const options = await languageSelect.locator('option').all();
     const optionValues = await Promise.all(options.map((opt) => opt.getAttribute('value')));
     expect(optionValues).toContain('en');
-    expect(optionValues).toContain('es');
-    expect(optionValues).toContain('pt');
     expect(optionValues).toContain('fa');
-    expect(optionValues).toContain('ja');
-    expect(optionValues).toContain('hi');
-    expect(optionValues).toContain('th');
+    expect(optionValues).toHaveLength(2);
+    expect(optionValues, 'es must no longer be a selectable UI language').not.toContain('es');
+    expect(optionValues, 'pt must no longer be a selectable UI language').not.toContain('pt');
+    expect(optionValues, 'ja must no longer be a selectable UI language').not.toContain('ja');
+    expect(optionValues, 'hi must no longer be a selectable UI language').not.toContain('hi');
+    expect(optionValues, 'th must no longer be a selectable UI language').not.toContain('th');
 
     // Check document does not overflow horizontally in RTL
     const storeOverflow = await page.evaluate(() => ({

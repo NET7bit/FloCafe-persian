@@ -973,12 +973,15 @@ test('Network pairing cards explain local and VPN/mesh QR choices across setting
   await page.getByRole('button', { name: 'Load POS Info', exact: true }).click();
   const englishLocalHint = 'Use when all devices can reach this address over Wi-Fi, Ethernet, or a VPN/mesh network';
   const englishVpnHint = 'Use when devices connect via a VPN or mesh network across different subnets or locations';
-  const expectLocalAddressCard = async () => {
+  const expectLocalAddressCard = async (
+    localHint: string = englishLocalHint,
+    localNetworkLabel: string = 'Local Network',
+  ) => {
     const localAddress = 'http://10.42.0.25:3001';
     const localCard = page.getByText(localAddress, { exact: true }).locator('xpath=..');
     await expect(localCard.getByRole('link')).toHaveAttribute('href', localAddress);
-    await expect(localCard.getByText('Local Network', { exact: true })).toBeVisible();
-    await expect(localCard).toContainText(englishLocalHint);
+    await expect(localCard.getByText(localNetworkLabel, { exact: true })).toBeVisible();
+    await expect(localCard).toContainText(localHint);
   };
   await expectPairingHints(englishLocalHint, englishVpnHint, 'VPN / Mesh Network');
   await expectLocalAddressCard();
@@ -1000,28 +1003,57 @@ test('Network pairing cards explain local and VPN/mesh QR choices across setting
   await expectPairingHints(englishLocalHint, englishVpnHint, 'VPN / Mesh Network');
   await expectLocalAddressCard();
 
-  await selectLanguage('Store Details', 'es');
-  await page.getByRole('button', { name: 'Flujo del POS', exact: true }).click();
-  await expectPairingHints(
-    'Úsalo cuando todos los dispositivos puedan acceder a esta dirección por Wi-Fi, Ethernet o una red VPN/mesh',
-    'Úsalo cuando los dispositivos se conecten mediante una VPN o una red mesh entre distintas subredes o ubicaciones',
-    'VPN / Red mesh',
+  // #c0c5fce4 restricted the shipped catalogs to exactly en and fa. The
+  // removed es/de/ar options are gone from the dropdown; assert that contract
+  // directly, then keep the cross-tab / cross-language coverage with the
+  // remaining supported locale (Persian, RTL) and an unsupported-tag case
+  // that must resolve through the English fallback.
+  await page.getByRole('button', { name: 'Store Details', exact: true }).click();
+  const languageValues = await Promise.all(
+    (await page.locator('select').filter({ has: page.locator('option[value="en"]') }).first().locator('option').all())
+      .map((opt) => opt.getAttribute('value')),
   );
+  expect(languageValues).toEqual(['en', 'fa']);
+  for (const removed of ['es', 'de', 'ar']) {
+    expect(languageValues, `${removed} must no longer be selectable`).not.toContain(removed);
+  }
 
-  await selectLanguage('Datos del Negocio', 'de');
-  await page.getByRole('button', { name: 'KDS & Küche', exact: true }).click();
-  await expectPairingHints(
-    'Verwenden Sie diese Option, wenn alle Geräte diese Adresse über WLAN, Ethernet oder ein VPN-/Mesh-Netzwerk erreichen können',
-    'Verwenden Sie diese Option, wenn Geräte über ein VPN oder Mesh-Netzwerk über verschiedene Subnetze oder Standorte hinweg verbunden sind',
-    'VPN / Mesh-Netzwerk',
-  );
+  // Persian: the shipped fa catalog renders the pairing hints on all three
+  // settings tabs, in RTL, with the localized local-network label.
+  const persianLocalHint = 'وقتی همه دستگاه‌ها بتوانند از طریق Wi-Fi، Ethernet یا شبکه VPN/mesh به این نشانی دسترسی داشته باشند، از این گزینه استفاده کنید';
+  const persianVpnHint = 'وقتی دستگاه‌ها از طریق VPN یا شبکه مش بین زیرشبکه‌ها یا مکان‌های مختلف متصل می‌شوند، از این گزینه استفاده کنید';
+  const persianVpnLabel = 'VPN / شبکه مش';
+  const persianLocalNetwork = 'شبکه محلی';
 
-  await selectLanguage('Geschäftsdaten', 'ar');
+  await selectLanguage('Store Details', 'fa');
   await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
-  await page.getByRole('button', { name: 'الطلب من جانب الطاولة', exact: true }).click();
-  await expectPairingHints(
-    'استخدم هذا الخيار عندما تتمكن جميع الأجهزة من الوصول إلى هذا العنوان عبر Wi-Fi أو Ethernet أو شبكة VPN/mesh',
-    'استخدم هذا الخيار عندما تتصل الأجهزة عبر VPN أو شبكة متداخلة بين شبكات فرعية أو مواقع مختلفة',
-    'شبكة VPN / شبكة متشابكة',
-  );
+  await page.getByRole('button', { name: 'گردش کار POS', exact: true }).click();
+  await expectPairingHints(persianLocalHint, persianVpnHint, persianVpnLabel);
+  await expectLocalAddressCard(persianLocalHint, persianLocalNetwork);
+
+  await page.getByRole('button', { name: 'نمایشگر آشپزخانه', exact: true }).click();
+  await expectPairingHints(persianLocalHint, persianVpnHint, persianVpnLabel);
+  await expectLocalAddressCard(persianLocalHint, persianLocalNetwork);
+
+  // The shipped fa label contains a ZWNJ (U+200C) between سفارش and گیری;
+  // match it structurally so the locator stays exact without embedding an
+  // invisible character in this source file.
+  await page.getByRole('button', { name: /^سفارش.?گیری پشت میز$/ }).click();
+  await expectPairingHints(persianLocalHint, persianVpnHint, persianVpnLabel);
+  await expectLocalAddressCard(persianLocalHint, persianLocalNetwork);
+
+  // An unsupported stored language tag must fall back to English on every
+  // pairing card rather than resurrecting a removed catalog.
+  await page.addInitScript(() => {
+    const raw = localStorage.getItem('pos-settings');
+    const parsed = raw ? JSON.parse(raw) : { state: {}, version: 3 };
+    parsed.state = { ...parsed.state, language: 'es' };
+    parsed.version ??= 3;
+    localStorage.setItem('pos-settings', JSON.stringify(parsed));
+  });
+  await page.goto(`${BASE}/settings?tab=pos`);
+  await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
+  await page.getByRole('button', { name: 'Load POS Info', exact: true }).click();
+  await expectPairingHints(englishLocalHint, englishVpnHint, 'VPN / Mesh Network');
+  await expectLocalAddressCard();
 });
