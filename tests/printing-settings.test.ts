@@ -23,9 +23,11 @@ const { settingsRoutes } = require('../main/routes/settings');
 
 const basePayload = {
   printer_trim_decimals: true,
-  bill_language_policy: { primary: { mode: 'fixed', language: 'de' }, additional: ['fa'] },
-  kot_language_policy: { primary: { mode: 'fixed', language: 'tr' }, additional: [] },
-  z_report_language_policy: { primary: { mode: 'fixed', language: 'fr' }, additional: [] },
+  // The shipped print-label registry is exactly en + fa; policies naming any
+  // other locale are rejected by the batch endpoint.
+  bill_language_policy: { primary: { mode: 'fixed', language: 'en' }, additional: ['fa'] },
+  kot_language_policy: { primary: { mode: 'fixed', language: 'fa' }, additional: [] },
+  z_report_language_policy: { primary: { mode: 'fixed', language: 'en' }, additional: [] },
   bill_show_name: false,
   bill_show_address: false,
   bill_show_phone: true,
@@ -60,12 +62,12 @@ async function main() {
     const ownerResponse = await api(baseUrl, '/api/settings/printing', { method: 'PUT', headers: owner.authHeader, body: basePayload });
     assertEqual(ownerResponse.status, 200, 'owner can save the complete printing settings payload atomically');
     assertPersisted(db, 'printer_trim_decimals', 'true', 'trim decimals is persisted');
-    assertPersisted(db, 'bill_language_policy', JSON.stringify({ primary: { mode: 'fixed', language: 'de' }, additional: ['fa'] }), 'receipt policy is normalized and persisted');
-    assertPersisted(db, 'kot_language_policy', JSON.stringify({ primary: { mode: 'fixed', language: 'tr' }, additional: [] }), 'KOT policy is normalized and persisted');
-    assertPersisted(db, 'z_report_language_policy', JSON.stringify({ primary: { mode: 'fixed', language: 'fr' }, additional: [] }), 'Z-report policy is normalized and persisted');
+    assertPersisted(db, 'bill_language_policy', JSON.stringify({ primary: { mode: 'fixed', language: 'en' }, additional: ['fa'] }), 'receipt policy is normalized and persisted');
+    assertPersisted(db, 'kot_language_policy', JSON.stringify({ primary: { mode: 'fixed', language: 'fa' }, additional: [] }), 'KOT policy is normalized and persisted');
+    assertPersisted(db, 'z_report_language_policy', JSON.stringify({ primary: { mode: 'fixed', language: 'en' }, additional: [] }), 'Z-report policy is normalized and persisted');
     const zReportRead = await api(baseUrl, '/api/settings/z_report_language_policy', { headers: owner.authHeader });
     assertEqual(zReportRead.status, 200, 'Z-report policy can be read through the settings API');
-    assertEqual(zReportRead.data.setting.value, JSON.stringify({ primary: { mode: 'fixed', language: 'fr' }, additional: [] }), 'settings API returns the persisted Z-report policy');
+    assertEqual(zReportRead.data.setting.value, JSON.stringify({ primary: { mode: 'fixed', language: 'en' }, additional: [] }), 'settings API returns the persisted Z-report policy');
     assertPersisted(db, 'bill_show_name', 'false', 'bill name visibility is persisted');
   assertPersisted(db, 'bill_delivery_show_customer_phone_always', 'true', 'the delivery customer-number override is persisted');
     assertPersisted(db, 'bill_show_tax_id', 'true', 'tax ID visibility is persisted');

@@ -57,14 +57,16 @@ const { useAuthStore } = require('../frontend/src/store/auth') as typeof import(
 const tenantA = {
   id: 1, business_name: 'Tenant A', business_type: 'restaurant', country: 'IN', currency: 'INR', timezone: 'UTC',
   plan: 'desktop', status: 'active', language: 'en',
-  bill_language_policy: JSON.stringify({ primary: { mode: 'fixed', language: 'es' }, additional: [] }),
-  kot_language_policy: JSON.stringify({ primary: { mode: 'fixed', language: 'es' }, additional: [] }),
+  bill_language_policy: JSON.stringify({ primary: { mode: 'fixed', language: 'en' }, additional: [] }),
+  kot_language_policy: JSON.stringify({ primary: { mode: 'fixed', language: 'en' }, additional: [] }),
 };
 const tenantB = {
   id: 2, business_name: 'Tenant B', business_type: 'restaurant', country: 'IN', currency: 'INR', timezone: 'UTC',
   plan: 'desktop', status: 'active', language: 'en',
-  bill_language_policy: JSON.stringify({ primary: { mode: 'fixed', language: 'de' }, additional: [] }),
-  kot_language_policy: JSON.stringify({ primary: { mode: 'fixed', language: 'de' }, additional: [] }),
+  // Distinct supported locale so the stale-restore assertions can prove that
+  // tenant B's policy survived rather than coincidentally matching tenant A.
+  bill_language_policy: JSON.stringify({ primary: { mode: 'fixed', language: 'fa' }, additional: [] }),
+  kot_language_policy: JSON.stringify({ primary: { mode: 'fixed', language: 'fa' }, additional: [] }),
 };
 
 async function run(): Promise<void> {
@@ -78,8 +80,8 @@ async function run(): Promise<void> {
 
   assert.equal(useAuthStore.getState().currentTenant?.id, 2, 'stale session restore cannot replace the selected tenant');
   assert.equal(settings.state.billTemplateSource, null, 'tenant selection clears stale bill template provenance');
-  assert.equal(settings.state.billLanguagePolicy.primary.language, 'de', 'stale restore cannot replace the receipt policy');
-  assert.equal(settings.state.kotLanguagePolicy.primary.language, 'de', 'stale restore cannot replace the KOT policy');
+  assert.equal(settings.state.billLanguagePolicy.primary.language, 'fa', 'stale restore cannot replace the receipt policy');
+  assert.equal(settings.state.kotLanguagePolicy.primary.language, 'fa', 'stale restore cannot replace the KOT policy');
   console.log('✅ stale auth bootstrap result is ignored after tenant selection');
 }
 

@@ -6,12 +6,12 @@
  * dial code → translation routing.
  *
  * Verifies that:
- *  - Onboarding with country=AR persists the country profile (es-AR, CUIT, IVA, Comprobante)
- *  - Argentina demo seed swaps in the hamburger menu and Spanish customer names with +54
+ *  - Onboarding with country=AR persists the country profile (CUIT, IVA, ARS, AR timezone)
+ *  - Demo seed falls back to the English catalog because only en/fa ship (#c0c5fce4)
  *  - Settings save/load round-trips the country and its derived fiscal fields
  *  - Non-Argentina onboarding still gets the legacy India demo (regression guard)
  *  - Tax engine runs the AR path without error
- *  - i18n has matching keys in en and es (no missing translations)
+ *  - i18n has matching keys in en and fa (no missing translations)
  *
  * Usage: node tests/run-electron-node-test.cjs tests/e2e-argentina-flow.test.ts
  */
@@ -110,6 +110,9 @@ async function runLegacyOnboardingInIsolation(legacyTestDir) {
 
 async function runArgentinaOnboarding(baseUrl, db) {
   console.log('\n1. Onboarding with country = AR');
+  // The legacy `es` request is retained deliberately: the setup endpoint still
+  // accepts it, and the seed must fall back to English rather than resurrect a
+  // removed catalog.
   const res = await api(baseUrl + '/api', '/auth/setup/initialize', {
     method: 'POST',
     body: {
@@ -141,20 +144,24 @@ async function runArgentinaOnboarding(baseUrl, db) {
   const curSymbol = db.prepare("SELECT value FROM settings WHERE key = 'currency_symbol'").get();
   assertEqual(curSymbol.value, '$', 'DB currency_symbol = $ for ARS');
 
+  // #c0c5fce4 reduced the shipped catalogs to en/fa, and resolveSeedLanguage()
+  // deliberately maps every other request to English. AR onboarding therefore
+  // seeds the English fallback demo, not the retired Spanish hamburger demo.
   const burger = db.prepare("SELECT id FROM products WHERE id = 'prod-demo-hamburguesa-clasica'").get();
-  assert(!!burger, 'Argentina demo seeds the hamburger menu');
-  const indiaMenu = db.prepare("SELECT id FROM products WHERE id = 'prod-demo-butter-chicken'").get();
-  assert(!indiaMenu, 'Argentina demo does NOT seed the legacy India menu');
+  assert(!burger, 'AR onboarding no longer seeds the retired Spanish hamburger menu');
+  const englishMenu = db.prepare("SELECT id FROM products WHERE id = 'prod-demo-butter-chicken'").get();
+  assert(!!englishMenu, 'AR onboarding seeds the English fallback demo menu');
 
-  const sofia = db.prepare("SELECT id, name, country_code FROM customers WHERE id = 'cust-demo-1'").get();
-  assert(!!sofia, 'Argentina demo seeds a demo customer');
-  assertEqual(sofia.country_code, '+54', 'demo customer uses +54 country code');
+  const demoCustomer = db.prepare("SELECT id, name, country_code FROM customers WHERE id = 'cust-demo-1'").get();
+  assert(!!demoCustomer, 'AR onboarding seeds a demo customer');
+  assertEqual(demoCustomer.name, 'Aarav Sharma', 'demo customer uses the English fallback name');
+  assertEqual(demoCustomer.country_code, '+91', 'demo customer phone comes from the English fallback demo');
 
   const staffName = db.prepare("SELECT name FROM users WHERE id = 'user-demo-manager'").get();
-  assertEqual(staffName.name, 'Gerente Demo', 'demo staff localized to es');
+  assertEqual(staffName.name, 'Demo Manager', 'demo staff uses the English fallback name');
 
-  const cuisine = db.prepare("SELECT name FROM categories WHERE id = 'cat-demo-burger'").get();
-  assertEqual(cuisine.name, 'Hamburguesas', 'demo category localized to es');
+  const cuisine = db.prepare("SELECT name FROM categories WHERE id = 'cat-demo-main'").get();
+  assertEqual(cuisine.name, 'Main Course', 'demo category uses the English fallback name');
 }
 
 async function runArgentinaSettings(baseUrl, db) {
@@ -209,23 +216,30 @@ async function runArgentinaTaxAndCustomers(baseUrl, db) {
 }
 
 async function runArgentinaTranslations(db) {
-  console.log('\n4. i18n has matching keys for both languages and every t() reference resolves');
+  console.log('\n4. i18n has matching keys for both shipped languages and every t() reference resolves');
   const i18nDir = path.join(__dirname, '../frontend/src/lib/i18n/messages');
   const enSrc = fs.readFileSync(path.join(i18nDir, 'en.json'), 'utf8');
-  const esSrc = fs.readFileSync(path.join(i18nDir, 'es.json'), 'utf8');
+  const faSrc = fs.readFileSync(path.join(i18nDir, 'fa.json'), 'utf8');
 
   const enKeys = extractJsonKeys(enSrc);
-  const esKeys = extractJsonKeys(esSrc);
-  assert(enKeys.size > 0 && esKeys.size > 0, 'i18n defines both en and es blocks');
-  if (enKeys.size === 0 || esKeys.size === 0) return;
+  const faKeys = extractJsonKeys(faSrc);
+  assert(enKeys.size > 0 && faKeys.size > 0, 'i18n defines both en and fa blocks');
+  if (enKeys.size === 0 || faKeys.size === 0) return;
 
-  assertEqual(enKeys.size, esKeys.size, `en and es have the same number of keys (en=${enKeys.size}, es=${esKeys.size})`);
-  const missingInEs = [...enKeys].filter((k) => !esKeys.has(k));
-  const missingInEn = [...esKeys].filter((k) => !enKeys.has(k));
-  assertEqual(missingInEs.length, 0, `es is missing keys: ${missingInEs.join(', ') || 'none'}`);
+  assertEqual(enKeys.size, faKeys.size, `en and fa have the same number of keys (en=${enKeys.size}, fa=${faKeys.size})`);
+  const missingInFa = [...enKeys].filter((k) => !faKeys.has(k));
+  const missingInEn = [...faKeys].filter((k) => !enKeys.has(k));
+  assertEqual(missingInFa.length, 0, `fa is missing keys: ${missingInFa.join(', ') || 'none'}`);
   assertEqual(missingInEn.length, 0, `en is missing keys: ${missingInEn.join(', ') || 'none'}`);
 
-  assert(esSrc.includes("'CUIT'") || esSrc.includes("Comprobante") || esSrc.includes("es-AR"), 'i18n includes Argentina-context translations');
+  // Argentina's fiscal labels are locale-independent country data; the retired
+  // es catalog is no longer the source of truth for them.
+  const { getCountryByCode } = require('../main/countries');
+  const argentina = getCountryByCode('AR');
+  assert(!!argentina, 'country registry defines Argentina');
+  if (!argentina) return;
+  assertEqual(argentina.taxIdLabel, 'CUIT', 'Argentina tax-id label remains CUIT');
+  assertEqual(argentina.taxName, 'IVA', 'Argentina tax name remains IVA');
 
   // Walk the entire frontend src tree and assert every `t('key')` reference
   // resolves to a known key. Catches wiring gaps: a developer adds
