@@ -95,6 +95,22 @@ Module._load = function (request, parent, isMain) {
       beginDatabaseShutdown: () => { events.push('database.admission'); },
       closeDatabase: () => { events.push('database.close'); },
       waitForDatabaseRequests: () => Promise.resolve(),
+      // main/index.ts calls this shared boundary validator at module load, so
+      // the ./db stub must expose it with the same contract as main/db.ts:
+      // null when no E2E override is configured, otherwise the resolved root
+      // (rejected when it would land inside the checkout). The shutdown tests
+      // never set the override, which keeps app.setPath on its ordinary path.
+      resolveIsolatedUserDataRoot: () => {
+        const raw = process.env.FLO_E2E_USER_DATA_DIR;
+        if (!raw) return null;
+        const isolated = path.resolve(raw);
+        const repoRoot = path.resolve(__dirname, '..');
+        const relative = path.relative(repoRoot, isolated);
+        if (relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))) {
+          throw new Error('[DB] FLO_E2E_USER_DATA_DIR must not be the repository or a directory inside it');
+        }
+        return isolated;
+      },
       SchemaVersionMismatchError,
     };
   }

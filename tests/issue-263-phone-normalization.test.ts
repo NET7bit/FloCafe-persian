@@ -128,43 +128,74 @@ describe('Issue #263: Phone Normalization, Validation, and Privacy', () => {
     assert.equal(alertResult.count, 0, 'Fresh demo install must have 0 invalid phone alerts');
   });
 
-  test('seedDemoRestaurant in ES (AR) profile seeds valid Argentine E.164 phones', () => {
+  test('unsupported es (AR) locale falls back to the English demo with valid E.164 phones', () => {
     const db = getDatabase();
+    // The UI only supports en/fa. Keep the legacy es/AR request so the real
+    // fallback path is exercised rather than merely asserted in isolation.
     seedSetupProfile(db, 'demo', 'qsr', 'es', 'AR');
 
-    const customers = db.prepare('SELECT id, name, phone, phone_digits FROM customers WHERE is_active = 1').all();
+    const customers = db.prepare('SELECT id, name, phone, phone_digits, country_code FROM customers WHERE is_active = 1').all();
     assert.ok(customers.length >= 3);
 
     for (const c of customers) {
-      assert.ok(c.phone.startsWith('+54'), `Argentine customer ${c.name} phone ${c.phone} must start with +54`);
-      assert.equal(c.phone, '+' + c.phone_digits);
+      assert.ok(c.phone.startsWith('+'), `Customer ${c.name} phone ${c.phone} must be E.164`);
+      assert.equal(c.phone, '+' + c.phone_digits, `Customer ${c.name} phone ${c.phone} must match +phone_digits`);
     }
+    assert.equal(
+      customers.some((c) => c.name === 'Aarav Sharma' && c.phone === '+919876543210'),
+      true,
+      'an unsupported locale seeds the English demo customer',
+    );
+    assert.equal(
+      customers.some((c) => c.name === 'Juan Pérez' || c.phone.startsWith('+54')),
+      false,
+      'the removed Spanish/Argentine demo profile is not restored',
+    );
+
+    // The selected country still reaches the shared E.164 normalizer: AR
+    // national numbers resolve to +54 independently of the demo language.
+    const ar = normalizeOptionalPhone('1145678901', 'AR');
+    assert.equal(ar.valid, true, 'Argentine national number is accepted');
+    assert.equal(ar.e164, '+541145678901', 'Argentine national number normalizes to E.164');
+    assert.equal(ar.countryCode, '+54', 'Argentine national number keeps the +54 dial code');
   });
 
-  test('seedDemoRestaurant in French profile seeds localized demo data', () => {
+  test('supported fa (IR) locale seeds Persian localized demo data with valid E.164 phones', () => {
     const db = getDatabase();
-    seedSetupProfile(db, 'demo', 'finedine', 'fr', 'FR');
+    seedSetupProfile(db, 'demo', 'finedine', 'fa', 'IR');
 
-    assert.equal(db.prepare("SELECT name FROM categories WHERE id = 'cat-demo-starters'").get().name, 'Entrées');
-    assert.equal(db.prepare("SELECT name FROM products WHERE id = 'prod-demo-burger'").get().name, 'Burger Classique');
-    assert.equal(db.prepare("SELECT name FROM users WHERE id = 'user-demo-manager'").get().name, 'Gérant Démo');
+    assert.equal(db.prepare("SELECT name FROM categories WHERE id = 'cat-demo-starters'").get().name, 'پیش\u200cغذاها');
+    assert.equal(db.prepare("SELECT name FROM products WHERE id = 'prod-demo-kashk'").get().name, 'کشک بادمجان');
+    assert.equal(db.prepare("SELECT name FROM users WHERE id = 'user-demo-manager'").get().name, 'مدیر نمایشی');
 
-    const customer = db.prepare("SELECT phone, country_code FROM customers WHERE id = 'cust-demo-1'").get();
-    assert.equal(customer.phone, '+33145678901');
-    assert.equal(customer.country_code, '+33');
+    const customer = db.prepare("SELECT phone, phone_digits, country_code FROM customers WHERE id = 'cust-demo-1'").get();
+    assert.equal(customer.phone, '+989121234567');
+    assert.equal(customer.phone, '+' + customer.phone_digits, 'Persian demo phone matches +phone_digits');
+    assert.equal(customer.country_code, '+98');
+
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM categories WHERE name = 'Entrées'").get().n, 0,
+      'removed French demo categories are not seeded');
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM products WHERE name = 'Burger Classique'").get().n, 0,
+      'removed French demo products are not seeded');
   });
 
-  test('seedDemoRestaurant in German profile seeds localized demo data', () => {
+  test('unsupported de (DE) locale falls back to the English demo with valid E.164 phones', () => {
     const db = getDatabase();
     seedSetupProfile(db, 'demo', 'finedine', 'de', 'DE');
 
-    assert.equal(db.prepare("SELECT name FROM categories WHERE id = 'cat-demo-beverages'").get().name, 'Getränke');
-    assert.equal(db.prepare("SELECT name FROM products WHERE id = 'prod-demo-burger'").get().name, 'Klassischer Burger');
-    assert.equal(db.prepare("SELECT name FROM users WHERE id = 'user-demo-manager'").get().name, 'Demo-Manager');
+    assert.equal(db.prepare("SELECT name FROM categories WHERE id = 'cat-demo-beverages'").get().name, 'Beverages');
+    assert.equal(db.prepare("SELECT name FROM products WHERE id = 'prod-demo-butter-chicken'").get().name, 'Butter Chicken');
+    assert.equal(db.prepare("SELECT name FROM users WHERE id = 'user-demo-manager'").get().name, 'Demo Manager');
 
-    const customer = db.prepare("SELECT phone, country_code FROM customers WHERE id = 'cust-demo-1'").get();
-    assert.equal(customer.phone, '+4915123456789');
-    assert.equal(customer.country_code, '+49');
+    const customer = db.prepare("SELECT phone, phone_digits, country_code FROM customers WHERE id = 'cust-demo-1'").get();
+    assert.equal(customer.phone, '+919876543210');
+    assert.equal(customer.phone, '+' + customer.phone_digits, 'English fallback demo phone matches +phone_digits');
+    assert.equal(customer.country_code, '+91');
+
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM categories WHERE name = 'Getränke'").get().n, 0,
+      'removed German demo categories are not seeded');
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM users WHERE name = 'Demo-Manager'").get().n, 0,
+      'removed German demo staff are not seeded');
   });
 
   test('PUT /api/settings/business validates and normalizes business_phone', async () => {
