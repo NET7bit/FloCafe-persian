@@ -298,19 +298,41 @@ test('delivery exception: the Settings panel states the consequence next to the 
   );
 });
 
-test('delivery exception: the warning and override copy exist in every locale', () => {
+test('delivery exception: the warning and override copy exist in every supported locale', () => {
   const dir = path.join(__dirname, '../frontend/src/lib/i18n/messages');
+  // The UI is restricted to English and Persian. Assert the exact shipped set
+  // rather than a minimum count, so a removed locale can never be silently
+  // reintroduced and a supported catalog can never disappear.
+  const supportedLocales = ['en.json', 'fa.json'];
   const keys = ['deliveryCustomerPhoneWarning', 'deliveryShowCustomerPhoneAlways', 'deliveryShowCustomerPhoneAlwaysHint'];
   const files = fs.readdirSync(dir).filter((name) => name.endsWith('.json'));
-  assert.ok(files.length >= 24, `expected the full locale set, found ${files.length} files`);
-  for (const name of files) {
+  assert.deepEqual(
+    files.slice().sort(),
+    supportedLocales,
+    `the shipped UI locale set must be exactly en.json and fa.json, found ${JSON.stringify(files)}`,
+  );
+
+  const copyByLocale: Record<string, Record<string, string>> = {};
+  for (const name of supportedLocales) {
     const messages = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
+    copyByLocale[name] = {};
     for (const key of keys) {
       const value = messages.settings?.[key];
       assert.ok(
         typeof value === 'string' && value.length > 0,
         `${name}: settings.${key} is missing, so the merchant reads an untranslated warning`,
       );
+      copyByLocale[name][key] = value;
     }
+  }
+
+  // Persian copy must be a real translation, not an English fallback left
+  // behind when the other 22 locale catalogs were removed.
+  for (const key of keys) {
+    assert.notEqual(
+      copyByLocale['fa.json'][key],
+      copyByLocale['en.json'][key],
+      `fa.json: settings.${key} must be localized, not the English fallback`,
+    );
   }
 });
