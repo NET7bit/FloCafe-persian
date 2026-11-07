@@ -259,6 +259,7 @@
     "test:units": "ts-node --transpile-only -P tests/tsconfig.json tests/units.test.ts",
     "test:supplies-service": "node tests/run-electron-node-test.cjs tests/supplies-service.test.ts",
     "test:recipe-order-lifecycle": "node tests/run-electron-node-test.cjs tests/recipe-order-lifecycle.test.ts",
+    "test:recipe-ui": "node tests/run-electron-node-test.cjs tests/recipe-ui.test.ts",
     "test:suppliers-service": "node tests/run-electron-node-test.cjs tests/suppliers-service.test.ts",
     "test:suppliers-routes": "node tests/run-electron-node-test.cjs tests/suppliers-routes.test.ts",
     "test:migration-v93-suppliers": "node tests/run-electron-node-test.cjs tests/migration-v93-suppliers.test.ts",

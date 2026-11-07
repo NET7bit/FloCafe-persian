@@ -12,9 +12,15 @@ import { useTranslations } from 'use-intl';
 import { useFormatDate } from '@/hooks/useFormatDate';
 import { useFormatNumber } from '@/hooks/useFormatNumber';
 import { tenantCan } from '@/lib/permissions';
-
-const SUPPLY_UNITS = ['each', 'g', 'kg', 'ml', 'l'] as const;
-type SupplyUnit = (typeof SUPPLY_UNITS)[number];
+import RecipeFormDialog from '@/components/inventory/RecipeFormDialog';
+import {
+  SUPPLY_UNITS,
+  validateRecipeForm,
+  type RecipeFormError,
+  type RecipeFormState,
+  type RecipeSupplyOption,
+  type SupplyUnit,
+} from '@/lib/recipe-form';
 
 interface Supply {
   id: string;
@@ -104,7 +110,12 @@ export default function InventoryPage() {
 
   const [showRecipeForm, setShowRecipeForm] = useState(false);
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
-  const [recipeForm, setRecipeForm] = useState({ product_id: '', yield_quantity: '1', items: [] as { supply_id: string; quantity: string; unit: SupplyUnit }[] });
+  const [recipeForm, setRecipeForm] = useState<RecipeFormState>({ product_id: '', yield_quantity: '1', items: [] });
+  const [recipeError, setRecipeError] = useState<string | null>(null);
+  // The recipe editor needs every non-deleted supply, including inactive ones:
+  // the supplies tab filters (search / low stock / active only) must not hide a
+  // component that an existing recipe already references.
+  const [recipeSupplies, setRecipeSupplies] = useState<RecipeSupplyOption[]>([]);
 
   const [deletingSupply, setDeletingSupply] = useState<Supply | null>(null);
   const [deletingRecipe, setDeletingRecipe] = useState<Recipe | null>(null);
@@ -133,10 +144,18 @@ export default function InventoryPage() {
     Promise.all([
       api.get('/recipes', { signal: controller.signal }),
       api.get('/products', { signal: controller.signal }),
+      api.get('/supplies', { params: { include_inactive: 'true' }, signal: controller.signal }),
     ])
-      .then(([recipesRes, productsRes]) => {
+      .then(([recipesRes, productsRes, suppliesRes]) => {
         setRecipes(recipesRes.data.recipes || []);
         setProducts(productsRes.data.products || []);
+        // Keep inactive supplies available so editing an existing recipe never
+        // silently drops a component; deleted supplies stay excluded by the API.
+        setRecipeSupplies((suppliesRes.data.supplies || []).map((s: Supply) => ({
+          id: s.id,
+          name: s.name,
+          base_unit: s.base_unit,
+        })));
       })
       .catch((err: unknown) => {
         if (!(err instanceof Error && (err.name === 'CanceledError' || err.name === 'AbortError'))) toast.error(t('loadFailed'));
@@ -242,9 +261,20 @@ export default function InventoryPage() {
     }
   };
 
+  const recipeErrorMessages: Record<RecipeFormError, string> = {
+    productRequired: t('recipeErrorProductRequired'),
+    yieldInvalid: t('recipeErrorYield'),
+    itemsRequired: t('recipeErrorItems'),
+    supplyRequired: t('recipeErrorSupply'),
+    quantityInvalid: t('recipeErrorQuantity'),
+    unitInvalid: t('recipeErrorUnit'),
+    duplicateSupply: t('recipeErrorDuplicate'),
+  };
+
   const openAddRecipe = () => {
     setEditingRecipe(null);
     setRecipeForm({ product_id: '', yield_quantity: '1', items: [] });
+    setRecipeError(null);
     setShowRecipeForm(true);
   };
 
@@ -255,20 +285,25 @@ export default function InventoryPage() {
       yield_quantity: String(r.yield_quantity),
       items: r.items.map((item) => ({ supply_id: item.supply_id, quantity: String(item.quantity), unit: item.unit })),
     });
+    setRecipeError(null);
     setShowRecipeForm(true);
   };
 
   const handleSaveRecipe = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Preserve activation state: an inactive recipe stops Recipe Depletion, so
+    // re-saving it must not silently turn depletion back on.
+    const isActive = editingRecipe ? editingRecipe.is_active === 1 : true;
+    const validation = validateRecipeForm(recipeForm, recipeSupplies, isActive);
+    if (!validation.ok) {
+      const message = recipeErrorMessages[validation.error];
+      setRecipeError(message);
+      toast.error(message);
+      return;
+    }
+    setRecipeError(null);
     try {
-      await api.put(`/recipes/product/${recipeForm.product_id}`, {
-        yield_quantity: Number(recipeForm.yield_quantity),
-        items: recipeForm.items.map((item) => ({
-          supply_id: item.supply_id,
-          quantity: Number(item.quantity),
-          unit: item.unit,
-        })),
-      });
+      await api.put(`/recipes/product/${recipeForm.product_id}`, validation.payload);
       toast.success(tCommon('save'));
       setShowRecipeForm(false);
       refresh();
@@ -276,6 +311,7 @@ export default function InventoryPage() {
       const message = err instanceof Error && 'response' in err
         ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
         : undefined;
+      setRecipeError(message || t('saveFailed'));
       toast.error(message || t('saveFailed'));
     }
   };
@@ -302,8 +338,11 @@ export default function InventoryPage() {
       toast.success(tCommon('delete'));
       setDeletingRecipe(null);
       refresh();
-    } catch {
-      toast.error(t('deleteFailed'));
+    } catch (err: unknown) {
+      const message = err instanceof Error && 'response' in err
+        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+        : undefined;
+      toast.error(message || t('deleteFailed'));
     }
   };
 
@@ -429,7 +468,12 @@ export default function InventoryPage() {
               <tbody className="divide-y divide-border">
                 {recipes.map((r) => (
                   <tr key={r.id} className="hover:bg-muted">
-                    <td className="p-4 font-medium text-foreground">{r.product_name || r.product_id}</td>
+                    <td className="p-4 font-medium text-foreground">
+                      {r.product_name || r.product_id}
+                      {r.is_active !== 1 && (
+                        <Badge variant="secondary" className="ms-2">{tCommon('inactive')}</Badge>
+                      )}
+                    </td>
                     <td className="p-4 text-center text-sm">{fmtNum(Number(r.yield_quantity))}</td>
                     <td className="p-4 text-sm text-muted-foreground">
                       <ul className="space-y-0.5">
@@ -591,79 +635,16 @@ export default function InventoryPage() {
       )}
 
       {showRecipeForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card rounded-2xl p-6 w-full max-w-md max-h-[85vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold">{editingRecipe ? t('editRecipe') : t('addRecipe')}</h2>
-              <button onClick={() => setShowRecipeForm(false)}><X size={20} className="text-gray-400" /></button>
-            </div>
-            <form onSubmit={handleSaveRecipe} className="space-y-4">
-              <select value={recipeForm.product_id}
-                onChange={(e) => setRecipeForm({ ...recipeForm, product_id: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-brand bg-card"
-                required disabled={Boolean(editingRecipe)}>
-                <option value="">{t('product')}</option>
-                {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-              <input type="number" step="any" min="0.00000001" placeholder={t('yield')} value={recipeForm.yield_quantity}
-                onChange={(e) => setRecipeForm({ ...recipeForm, yield_quantity: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-brand" required />
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-foreground">{t('components')}</span>
-                  <Button type="button" variant="outline" size="sm"
-                    onClick={() => setRecipeForm({
-                      ...recipeForm,
-                      items: [...recipeForm.items, { supply_id: supplies[0]?.id || '', quantity: '1', unit: (supplies[0]?.base_unit || 'each') as SupplyUnit }],
-                    })}>
-                    <Plus size={14} /> {t('addComponent')}
-                  </Button>
-                </div>
-                {recipeForm.items.map((item, index) => (
-                  <div key={index} className="flex gap-2 mb-2">
-                    <select value={item.supply_id}
-                      onChange={(e) => {
-                        const items = [...recipeForm.items];
-                        const targetSupply = supplies.find((s) => s.id === e.target.value);
-                        items[index] = {
-                          ...items[index],
-                          supply_id: e.target.value,
-                          unit: (targetSupply?.base_unit || 'each') as SupplyUnit,
-                        };
-                        setRecipeForm({ ...recipeForm, items });
-                      }}
-                      className="flex-1 min-w-0 px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-brand bg-card">
-                      <option value="">{t('supply')}</option>
-                      {supplies.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                    <input type="number" step="any" min="0.00000001" placeholder={t('quantity')} value={item.quantity}
-                      onChange={(e) => {
-                        const items = [...recipeForm.items];
-                        items[index] = { ...items[index], quantity: e.target.value };
-                        setRecipeForm({ ...recipeForm, items });
-                      }}
-                      className="w-24 px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-brand" required />
-                    <select value={item.unit}
-                      onChange={(e) => {
-                        const items = [...recipeForm.items];
-                        items[index] = { ...items[index], unit: e.target.value as SupplyUnit };
-                        setRecipeForm({ ...recipeForm, items });
-                      }}
-                      className="px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-brand bg-card">
-                      {SUPPLY_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                    </select>
-                    <Button type="button" variant="ghost" size="icon-sm"
-                      onClick={() => setRecipeForm({ ...recipeForm, items: recipeForm.items.filter((_, i) => i !== index) })}>
-                      <X size={14} />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              <Button type="submit" className="w-full" disabled={recipeForm.items.length === 0}>{tCommon('save')}</Button>
-            </form>
-          </div>
-        </div>
+        <RecipeFormDialog
+          editing={Boolean(editingRecipe)}
+          form={recipeForm}
+          products={products}
+          supplies={recipeSupplies}
+          error={recipeError}
+          onChange={(next) => { setRecipeForm(next); setRecipeError(null); }}
+          onSubmit={handleSaveRecipe}
+          onCancel={() => setShowRecipeForm(false)}
+        />
       )}
 
       {deletingSupply && (

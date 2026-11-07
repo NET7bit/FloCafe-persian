@@ -518,7 +518,16 @@
     "saveFailed": "Failed to save",
     "deleteFailed": "Failed to delete",
     "confirmDeleteSupply": "Delete supply {name}? Its movement history will be kept.",
-    "confirmDeleteRecipe": "Delete the recipe for {name}?"
+    "confirmDeleteRecipe": "Delete the recipe for {name}?",
+    "unitForComponent": "Unit",
+    "removeComponent": "Remove component",
+    "recipeErrorProductRequired": "Select a product for this recipe.",
+    "recipeErrorYield": "Yield must be a number greater than zero.",
+    "recipeErrorItems": "Add at least one component to the recipe.",
+    "recipeErrorSupply": "Select a supply for every component.",
+    "recipeErrorQuantity": "Each component quantity must be a number greater than zero.",
+    "recipeErrorUnit": "The chosen unit is not compatible with the supply base unit.",
+    "recipeErrorDuplicate": "A supply can only appear once in a recipe."
   },
   "kds": {
     "addonsLabel": "Add-ons",
