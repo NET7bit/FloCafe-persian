@@ -518,7 +518,16 @@
     "saveFailed": "ذخیره ناموفق بود",
     "deleteFailed": "حذف ناموفق بود",
     "confirmDeleteSupply": "ماده اولیه {name} حذف شود؟ تاریخچه جابه‌جایی‌ها حفظ می‌شود.",
-    "confirmDeleteRecipe": "دستور {name} حذف شود؟"
+    "confirmDeleteRecipe": "دستور {name} حذف شود؟",
+    "unitForComponent": "واحد",
+    "removeComponent": "حذف جزء",
+    "recipeErrorProductRequired": "برای این دستور یک محصول انتخاب کنید.",
+    "recipeErrorYield": "بازده باید عددی بزرگتر از صفر باشد.",
+    "recipeErrorItems": "دستور باید دستکم یک جزء داشته باشد.",
+    "recipeErrorSupply": "برای هر جزء یک ماده اولیه انتخاب کنید.",
+    "recipeErrorQuantity": "مقدار هر جزء باید عددی بزرگتر از صفر باشد.",
+    "recipeErrorUnit": "واحد انتخابشده با واحد پایه ماده اولیه سازگار نیست.",
+    "recipeErrorDuplicate": "هر ماده اولیه تنها یکبار در دستور پذیرفته میشود."
   },
   "kds": {
     "addonsLabel": "افزودنی‌ها",

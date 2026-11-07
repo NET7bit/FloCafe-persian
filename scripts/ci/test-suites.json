@@ -221,5 +221,6 @@
   "test:import-restore-y1-y2-hardening",
   "test:lazy-startup-modules",
   "test:db-path-isolation",
+  "test:recipe-ui",
   "test:accounting-ui"
 ]
