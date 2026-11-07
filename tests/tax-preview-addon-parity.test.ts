@@ -65,8 +65,10 @@ async function main() {
   // a wrong path here would mean the suite is writing into someone else's database.
   const dbFile = (db.pragma('database_list') as Array<{ file?: string }>)[0]?.file || '';
   console.log('test database =', dbFile);
+  const testDirReal = fs.realpathSync(testDir);
+  const dbFileReal = fs.realpathSync(dbFile);
   assertOrThrow(
-    path.resolve(dbFile).startsWith(path.resolve(testDir) + path.sep),
+    dbFileReal.startsWith(testDirReal + path.sep),
     `the suite must use its own temp database, got ${dbFile || '(no file)'}`,
   );
 
