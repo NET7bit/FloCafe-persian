@@ -1,12 +1,12 @@
 # Internationalization
 
-FloCafe supports 23 UI languages. This page describes how a language is declared, loaded, and
+FloCafe supports 2 UI languages: English (en) and Persian (fa). This page describes how a language is declared, loaded, and
 validated, and how the UI language stays separate from a store's regional settings.
 
 ## Source of truth and the parity rule
 
 `frontend/src/lib/i18n/messages/en.json` is the canonical message catalogue. It holds 30
-top-level namespaces and 2,639 non-empty string leaves. Every other catalogue under
+top-level namespaces and 2,932 non-empty string leaves. Every other catalogue under
 `frontend/src/lib/i18n/messages/` must match it exactly: zero missing keys and zero orphan keys.
 
 Exact parity is a hard gate rather than a fallback, because there is no per-key English fallback in
@@ -15,8 +15,7 @@ translation test fails. `npm run i18n:check` runs `tests/translations.test.ts`, 
 registry and file consistency, key parity, ICU validity, placeholder and tag parity, per-language
 completeness, and frontend key safety.
 
-The 23 committed catalogues are: `ar`, `bn`, `de`, `en`, `es`, `fa`, `fil`, `fr`, `hi`, `id`, `it`,
-`ja`, `ko`, `nl`, `pt`, `ru`, `sq`, `th`, `tr`, `ur`, `vi`, `zh`, `zh-tw`.
+The 2 committed catalogues are: `en`, `fa`.
 
 ## The registry
 
@@ -26,7 +25,7 @@ language. Each entry carries:
 | Field | Meaning |
 | --- | --- |
 | key | The object key in `LANGUAGES`, and the language code used in settings, print policies, and message filenames. |
-| `locale` | The canonical BCP-47 tag passed to `Intl`. It is the tag, not the key: `de` has locale `de-DE`, `pt` has `pt-BR`. |
+| `locale` | The canonical BCP-47 tag passed to `Intl`. It is the tag, not the key: `fa` has locale `fa-IR`, `en` has `en`. |
 | `nativeName` | The endonym shown in the language picker. It is written in the language itself. |
 | `direction` | `ltr` or `rtl`. |
 | `selectable` | Whether the language may be chosen by an end user. |
@@ -42,8 +41,7 @@ gets a key such as `zh-tw` and a `locale` of `zh-TW`. See [adding a language](..
 
 ### Right-to-left languages
 
-Exactly three registered languages are right-to-left: `fa` (Persian, `fa-IR`), `ar` (Arabic,
-`ar-SA`), and `ur` (Urdu, `ur-PK`). There is no Hebrew locale.
+The single registered right-to-left language is `fa` (Persian, `fa-IR`).
 
 Direction is applied to the document by `HtmlLangSync` in
 `frontend/src/components/layout/HtmlLangSync.tsx`, which sets `<html lang>` to the language's

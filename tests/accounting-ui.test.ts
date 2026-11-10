@@ -47,6 +47,7 @@ const SECTION_FILES = [
   'ReconciliationTab.tsx',
   'IntegrityTab.tsx',
   'ManualJournalTab.tsx',
+  'OpeningBalanceTab.tsx',
   'FiscalPeriodsTab.tsx',
 ];
 
@@ -94,6 +95,13 @@ function uiCalls(): Array<{ method: string; url: string }> {
   while ((match = regex.exec(source)) !== null) {
     calls.push({ method: match[1].toUpperCase(), url: `/api${match[2]}`.replace(/\/+$/, '') });
   }
+  // Template-literal calls (e.g. `/accounting/journals/${id}`) normalise to a
+  // `:id` segment so they are checked against the declared route pattern too.
+  const templateRegex = /api\.(get|post|put|delete|patch)\(\s*`([^`]+)`/g;
+  while ((match = templateRegex.exec(source)) !== null) {
+    const normalized = match[2].replace(/\$\{[^}]+\}/g, ':id');
+    calls.push({ method: match[1].toUpperCase(), url: `/api${normalized}`.replace(/\/+$/, '') });
+  }
   return calls;
 }
 
@@ -124,6 +132,18 @@ function run(): void {
   const manualJournal = read(path.join(ACCOUNTING_DIR, 'ManualJournalTab.tsx'));
   assert(manualJournal.includes('ROLE_ACCESS.owner'), 'manual journal posting must require ROLE_ACCESS.owner');
   assert(manualJournal.includes("t('ownerOnly')"), 'manual journal must explain the owner-only restriction');
+  const openingBalance = read(path.join(ACCOUNTING_DIR, 'OpeningBalanceTab.tsx'));
+  assert(openingBalance.includes('ROLE_ACCESS.owner'), 'opening balance posting must require ROLE_ACCESS.owner');
+  assert(openingBalance.includes("t('ownerOnly')"), 'opening balance must explain the owner-only restriction');
+  assert(openingBalance.includes('createOpeningBalance'), 'opening balance must call the dedicated API helper');
+  assert(openingBalance.includes('fetchJournal'), 'opening balance must retrieve the posted journal');
+  assert(openingBalance.includes('isDateInClosedPeriod'), 'opening balance must project the fiscal closed-period gate');
+  assert(openingBalance.includes('accountingErrorMessage'), 'opening balance must surface backend 400/409 errors');
+  assert(page.includes('OpeningBalanceTab'), 'accounting page must render the opening balance tab');
+  assert(page.includes("tabOpeningBalance"), 'accounting page must label the opening balance tab');
+  const libSource = read(LIB_FILE);
+  assert(libSource.includes("api.post('/accounting/opening-balance'"), 'data layer must call POST /accounting/opening-balance');
+  assert(libSource.includes('/accounting/journals/'), 'data layer must call GET /accounting/journals/:id');
   console.log('  ✓ page and sections exist with owner/manager read and owner-only posting');
 
   // 3. Reference data is fetched once per surface (no duplicated financial state).
