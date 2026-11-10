@@ -121,21 +121,22 @@ A–H (API stable)        I  UI / Accounting Operations      —
 1. **Objective:** ورود مانده‌های افتتاحیه و اصلاحات دستی owner با کنترل کامل.
 2. **Scope:** manual journal route + opening convention؛ هیچ تغییر schema (در صورت نیاز به
    `seq` قراردادی — همان ستون موجود).
-3. **Included:** manual journal (multi-line)؛ opening balances via manual journal؛ balanced
-   validation؛ owner-only؛ fiscal validation؛ reversal؛ **تصمیم opening-balance
-   idempotency/source** (Open Question #1 — پیشنهاد: `source_module='manual'`، ‏`source_id`
-   اختیاری، ‏`seq=1`؛ بدون schema جدید).
+3. **Included:** manual journal (multi-line)؛ opening balances via dedicated `createOpeningBalance`
+   (source_module=`opening_balance`)؛ balanced validation؛ owner-only؛ fiscal validation؛ reversal؛
+   **opening-balance idempotency/source resolved**: `source_module='opening_balance'` with a
+   deterministic, service-derived `source_id` (`openingBalanceSourceId`, a hash of the opening's
+   lines); the client must not supply `source_id`.
 4. **Excluded:** Opening wizard UI (I)؛ wallet/cash accounts جدید.
 5. **Modules/files:** `main/routes/accounting.ts` (POST /journals)، ‏`main/services/accounting.ts`.
 6. **Existing SoT:** —.
-7. **New SoT:** ردیف‌های manual در `journal_entries` (source_module='manual').
+7. **New SoT:** ردیف‌های manual در `journal_entries` (source_module='manual')؛ ردیف‌های opening balance نیز در همان جدول با source_module='opening_balance' ثبت می‌شوند.
 8. **Dependencies:** A.
 9. **DB impact:** —.
 10. **API/service:** ‏`POST /api/accounting/journals` (owner)، ‏`POST /api/accounting/journals/:id/reverse` (owner).
 11. **UI impact:** — (I بعداً).
 12. **Transaction:** با A مشترک.
 13. **Fiscal:** همان gate؛ opening journal به تاریخ افتتاح (کسب‌وکار) نیاز دارد.
-14. **Idempotency:** client-supplied `source_id` برای opening؛ duplicate → 409.
+14. **Idempotency:** `source_id` افتتاحیه deterministic و service-derived است (`openingBalanceSourceId` روی خطوط سند)؛ client اجازهٔ تعیین آن را ندارد. ثبت تکراری با همان محتوا روی `UNIQUE(source_module, source_id, seq)` برخورد کرده و 409 برمی‌گرداند.
 15. **Reversal:** reversal-only.
 16. **Tests:** `accounting-manual-journal` (balanced/owner-gate/fiscal/reversal/opening).
 17. **Regression:** A suites.
@@ -377,7 +378,7 @@ idempotent journal creation
 
 | Risk | Impact | Mitigation | Blocker? | Decision Needed? |
 | --- | --- | --- | --- | --- |
-| Opening-balance idempotency/source | مانده افتتاحیه دوبار ثبت شود | پیش‌فرض: manual + client source_id + UNIQUE | برای B-part؛ پیش‌فرض ثبت شده — تأیید کافی | بله (OQ#1) |
+| Opening-balance idempotency/source | مانده افتتاحیه دوبار ثبت شود | opening_balance + deterministic service-derived source_id (`openingBalanceSourceId`) + UNIQUE(source_module, source_id, seq) → 409 on duplicate | حل‌شده — پیاده‌سازی شده (opening_balance با source_id derived) | خیر |
 | Adapter failure / missing journal | journal گم شود | log/error + derived reconciliation + explicit reprocess operation + idempotency (`source_module + source_id + seq`)؛ گزارش H | خیر | بله (پیش‌فرض report-only) |
 | Closed-period برای adapter | journal دوران بسته | طبق blockquote §7.1: 409 → سند POS موفق می‌ماند → error/log → reconciliation journal ناموجود را پیدا می‌کند → پس از reopen، reprocess operation → journal idempotent | خیر | خیر |
 | Reversal قبل از hard delete | journal یتیم | reversal همزمان در همان txn سرویس (D/E/F) | خیر | خیر |
@@ -394,8 +395,10 @@ idempotent journal creation
 
 ## 17. Open Questions (بدون اختراع تصمیم جدید)
 
-1. **Opening-balance idempotency/source** — پیش‌فرض پیشنهادی: manual + client-supplied source_id؛
-   تأیید در شروع B.
+1. **Opening-balance idempotency/source** — **Resolved**: opening balances use
+   `source_module='opening_balance'` with a deterministic, service-derived `source_id`
+   (`openingBalanceSourceId`, a hash of the opening's lines). Clients must not supply `source_id`; a
+   duplicate with identical content returns 409 via `UNIQUE(source_module, source_id, seq)`.
 2. **COGS pricing evidence** — پیش‌نیاز G (unit-cost snapshot بدون نقض قانون ۴).
 3. **Adapter failure reconciliation/reprocess operation** — نحوه دسترسی owner/operator به گزارش
    mismatch («Adapter Failure / Missing-Journal Reconciliation Report»، H) و اجرای دوباره

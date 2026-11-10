@@ -31,23 +31,12 @@ const {
 
 const {
   COUNTRIES,
-  countryName,
   formatCurrency,
   getCountryByCode,
   getCurrencySymbol,
 } = require('../main/countries');
 const { authRoutes } = require('../main/routes/auth');
 const { settingsRoutes } = require('../main/routes/settings');
-
-function countrySearch(query: string) {
-  const q = query.trim().toLowerCase();
-  return COUNTRIES.filter((country: any) => (
-    countryName(country.code).toLowerCase().includes(q)
-    || country.code.toLowerCase().includes(q)
-    || country.currency.toLowerCase().includes(q)
-    || country.locale.toLowerCase().includes(q)
-  ));
-}
 
 async function main() {
   console.log('Issue #265: Morocco / MAD country profile');
@@ -74,11 +63,13 @@ async function main() {
     assertEqual(getCurrencySymbol('MAD', morocco.locale), 'MAD', 'MAD symbol policy uses ISO code');
     assertIncludes(formatCurrency(12.5, 'MAD', morocco.locale), 'MAD', 'fr-MA currency format includes MAD');
 
-    console.log('\n2. Setup and Settings search inputs can find Morocco');
-    assert(countrySearch('Morocco').some((country: any) => country.code === 'MA'), 'search by country name finds MA');
-    assert(countrySearch('MA').some((country: any) => country.code === 'MA'), 'search by country code finds MA');
-    assert(countrySearch('MAD').some((country: any) => country.code === 'MA'), 'search by currency finds MA');
-    assert(countrySearch('fr-MA').some((country: any) => country.code === 'MA'), 'search by locale finds MA');
+    console.log('\n2. Selectable country catalogue is restricted; legacy profiles remain resolvable');
+    assertEqual(COUNTRIES.length, 1, 'selectable country catalogue contains only IR');
+    assertEqual(COUNTRIES[0]?.code, 'IR', 'IR is the only selectable country');
+    const legacyMorocco = getCountryByCode('MA');
+    assert(!!legacyMorocco, 'legacy MA country profile remains resolvable');
+    assertEqual(legacyMorocco.currency, 'MAD', 'legacy MA profile retains MAD currency');
+    assertEqual(legacyMorocco.locale, 'fr-MA', 'legacy MA profile retains fr-MA locale');
 
     console.log('\n3. First-run setup persists the Morocco profile');
     const setupRes = await api(baseUrl, '/api/auth/setup/initialize', {

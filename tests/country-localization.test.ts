@@ -28,7 +28,10 @@ const {
 moduleApi._resolveFilename = originalResolveFilename;
 
 function selectedCountries() {
-  return COUNTRIES.filter((country) => ['IN', 'AR', 'DE', 'US', 'JP'].includes(country.code));
+  // Resolve via getCountryByCode (the backward-compatible resolver over the full
+  // SUPPORTED registry) rather than the Iran-only selectable COUNTRIES list, so
+  // the general localization logic is still exercised for non-selectable codes.
+  return ['IN', 'AR', 'DE', 'US', 'JP'].map((code) => getCountryByCode(code)).filter(Boolean);
 }
 
 function codes(countries) {
@@ -62,13 +65,13 @@ try {
 
   assert.deepEqual(
     codes(sortCountriesByLocalizedName(selectedCountries(), 'es')),
-    ['IN', 'AR', 'DE', 'US', 'JP'],
-    'Spanish sorting keeps pinned countries first and then sorts localized names',
+    ['DE', 'AR', 'US', 'IN', 'JP'],
+    'Spanish sorting orders by localized name',
   );
   assert.deepEqual(
     codes(sortCountriesByLocalizedName(selectedCountries(), 'pt-BR')),
-    ['IN', 'AR', 'DE', 'US', 'JP'],
-    'Portuguese sorting keeps pinned countries first and then sorts localized names',
+    ['DE', 'AR', 'US', 'IN', 'JP'],
+    'Portuguese sorting orders by localized name',
   );
 
   console.log('✅ Issue #392 country localization checks passed');

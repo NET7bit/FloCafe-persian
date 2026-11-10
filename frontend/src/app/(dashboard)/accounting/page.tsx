@@ -15,6 +15,7 @@ import BalanceSheetTab from '@/components/accounting/BalanceSheetTab';
 import ReconciliationTab from '@/components/accounting/ReconciliationTab';
 import IntegrityTab from '@/components/accounting/IntegrityTab';
 import ManualJournalTab from '@/components/accounting/ManualJournalTab';
+import OpeningBalanceTab from '@/components/accounting/OpeningBalanceTab';
 import FiscalPeriodsTab from '@/components/accounting/FiscalPeriodsTab';
 import { AccountingError } from '@/components/accounting/shared';
 
@@ -28,6 +29,7 @@ const TABS = [
   { value: 'reconciliation', labelKey: 'tabReconciliation' },
   { value: 'integrity', labelKey: 'tabIntegrity' },
   { value: 'manual-journal', labelKey: 'tabManualJournal' },
+  { value: 'opening-balance', labelKey: 'tabOpeningBalance' },
   { value: 'fiscal-periods', labelKey: 'tabFiscalPeriods' },
 ] as const;
 
@@ -121,6 +123,9 @@ export default function AccountingPage() {
         </TabsContent>
         <TabsContent value="manual-journal">
           <ManualJournalTab periods={periods} />
+        </TabsContent>
+        <TabsContent value="opening-balance">
+          <OpeningBalanceTab periods={periods} />
         </TabsContent>
         <TabsContent value="fiscal-periods">
           <FiscalPeriodsTab

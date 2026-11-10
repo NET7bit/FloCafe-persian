@@ -253,3 +253,52 @@ export async function fetchIntegrity(signal?: AbortSignal): Promise<IntegrityRep
 export async function createManualJournal(input: ManualJournalInput): Promise<void> {
   await api.post('/accounting/manual-journal', input);
 }
+
+export interface OpeningBalanceLine {
+  account_id: string;
+  /** Positive opens an asset balance; negative carries the offsetting liability/equity balance. */
+  amount: number;
+  line_description?: string;
+}
+
+export interface OpeningBalanceInput {
+  entry_date: string;
+  description?: string;
+  reference?: string;
+  lines: OpeningBalanceLine[];
+}
+
+export interface AccountingJournalLine {
+  id: string;
+  account_id: string;
+  direction: JournalDirection;
+  amount: number;
+  line_description: string | null;
+}
+
+export interface AccountingJournal {
+  id: string;
+  entry_date: string;
+  description: string | null;
+  source_module: AccountingSourceModule;
+  source_id: string | null;
+  seq: number;
+  reference: string | null;
+  status: 'posted' | 'reversed';
+  reverses_journal_id: string | null;
+  created_by: string;
+  created_at: string;
+  lines?: AccountingJournalLine[];
+}
+
+/** Posts the initial-balance transfer; identity and validation stay backend-owned. */
+export async function createOpeningBalance(input: OpeningBalanceInput): Promise<AccountingJournal> {
+  const { data } = await api.post('/accounting/opening-balance', input);
+  return data.journal as AccountingJournal;
+}
+
+/** Reads one journal (with its lines) after posting. */
+export async function fetchJournal(id: string): Promise<AccountingJournal> {
+  const { data } = await api.get(`/accounting/journals/${id}`);
+  return data.journal as AccountingJournal;
+}

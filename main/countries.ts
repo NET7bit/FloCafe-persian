@@ -216,19 +216,28 @@ function build(code: string): Country {
   };
 }
 
-export const COUNTRIES: Country[] = Object.keys(SUPPORTED)
+/**
+ * Selectable country catalogue — the only country offered in the setup and
+ * settings UI. FloCafe is scoped to a single regional catalogue (Iran). The full
+ * `SUPPORTED` table is retained beneath for backward-compatible resolution of
+ * already-stored regional settings, so existing tenant data keeps resolving and
+ * nothing stored is ever rejected or rewritten.
+ */
+export const SELECTABLE_COUNTRY_CODES = ['IR'] as const;
+
+export const COUNTRIES: Country[] = (Object.keys(SUPPORTED) as string[])
+  .filter((code) => (SELECTABLE_COUNTRY_CODES as readonly string[]).includes(code))
   .map(build)
-  .sort((a, b) => {
-    if (a.code === 'IN') return -1;
-    if (b.code === 'IN') return 1;
-    if (a.code === 'AR') return -1;
-    if (b.code === 'AR') return 1;
-    return a.name.localeCompare(b.name);
-  });
+  .sort((a, b) => a.name.localeCompare(b.name));
 
 export const getCountryByCode = (code: string): Country | undefined => {
   if (!code) return undefined;
-  return COUNTRIES.find((c) => c.code === code.toUpperCase());
+  const key = code.toUpperCase();
+  // Resolve from the full SUPPORTED registry so already-stored regional settings
+  // (which may predate the Iran-only selectable catalogue) keep resolving. The
+  // selectable catalogue is COUNTRIES, restricted to Iran; this lookup is the
+  // backward-compatible resolver, not the picker.
+  return SUPPORTED[key] ? build(key) : undefined;
 };
 
 // countryCode is required: regional settings come from signup, never from a

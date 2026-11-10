@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getCountryByCode } from '../main/countries';
+import { COUNTRIES, getCountryByCode } from '../main/countries';
+import { listSupportedCurrencyCodes } from '../shared/currencies';
 
 test('IR country profile properties', () => {
   const ir = getCountryByCode('IR');
@@ -13,4 +14,13 @@ test('IR country profile properties', () => {
   assert.equal(ir.taxIdLabel, 'Economic Code');
   assert.equal(ir.taxName, 'VAT');
   assert.equal(ir.taxIdFormat, undefined, 'No tax ID format should be enforced for IR');
+});
+
+test('selectable country catalogue is Iran-only', () => {
+  assert.equal(COUNTRIES.length, 1, 'exactly one selectable country');
+  assert.equal(COUNTRIES[0].code, 'IR');
+});
+
+test('selectable currency catalogue is IRR-only', () => {
+  assert.deepEqual(listSupportedCurrencyCodes(), ['IRR']);
 });

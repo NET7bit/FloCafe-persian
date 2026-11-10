@@ -82,19 +82,9 @@ export function countryMatchesQuery(country: Country, query: string, locale: str
   ].some((value) => value.toLocaleLowerCase(locale).includes(normalizedQuery));
 }
 
-/** Sort countries by their localized display name while keeping IN and AR pinned first. */
+/** Sort countries by their localized display name. */
 export function sortCountriesByLocalizedName(countries: readonly Country[], locale: string): Country[] {
-  const pinned = ['IN', 'AR'];
-  const pinIndex = (code: string) => {
-    const index = pinned.indexOf(code);
-    return index === -1 ? pinned.length : index;
-  };
-
   return [...countries].sort((a, b) => {
-    const aPin = pinIndex(a.code);
-    const bPin = pinIndex(b.code);
-    if (aPin !== bPin) return aPin - bPin;
-
     const aName = getLocalizedCountryName(a.code, locale);
     const bName = getLocalizedCountryName(b.code, locale);
     try {
