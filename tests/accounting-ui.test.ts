@@ -237,6 +237,40 @@ function run(): void {
   assert(isDateInClosedPeriod(closedOtherMonth, businessDate) === false, 'F1-C: a closed period outside the date must not block posting');
   console.log('  ✓ fiscal-period badge matches the backend closed-period gate (open / closed / uncovered)');
 
+  // 8. Balance-validation tolerance must be unified across UI and backend.
+  //    The backend (main/services/accounting.ts) rejects a journal whose debit/credit
+  //    difference exceeds 1e-9; the UI entry forms must use the same threshold so an
+  //    input the UI accepts is never rejected by the backend.
+  const extractNumber = (src: string, re: RegExp, label: string): number => {
+    const m = re.exec(src);
+    assert(Boolean(m), `${label}: could not extract tolerance`);
+    return Number(m![1]);
+  };
+  const obUiSrc = read(path.join(ACCOUNTING_DIR, 'OpeningBalanceTab.tsx'));
+  const mjUiSrc = read(path.join(ACCOUNTING_DIR, 'ManualJournalTab.tsx'));
+  const uiToleranceRe = /const TOLERANCE\s*=\s*([0-9.eE+-]+)/;
+  const uiTolerance = extractNumber(obUiSrc, uiToleranceRe, 'OpeningBalanceTab TOLERANCE');
+  assert(
+    uiTolerance === extractNumber(mjUiSrc, uiToleranceRe, 'ManualJournalTab TOLERANCE'),
+    'Opening and Manual journal UIs must share one balance tolerance',
+  );
+  const backendSrc = read(path.join(ROOT, 'main/services/accounting.ts'));
+  const backendTolerance = extractNumber(
+    backendSrc,
+    /Math\.abs\(debitTotal - creditTotal\)\s*>\s*([0-9.eE+-]+)/,
+    'backend journal balance tolerance',
+  );
+  assert(
+    uiTolerance === backendTolerance,
+    `UI tolerance (${uiTolerance}) must equal backend tolerance (${backendTolerance})`,
+  );
+  assert(uiTolerance === 1e-9, `unified balance tolerance must be 1e-9 (backend authority), found ${uiTolerance}`);
+  const balanced = (diff: number): boolean => Math.abs(diff) <= uiTolerance;
+  assert(balanced(0.5 * uiTolerance) === true, 'difference below tolerance must be accepted');
+  assert(balanced(uiTolerance) === true, 'difference equal to tolerance must be accepted');
+  assert(balanced(2 * uiTolerance) === false, 'difference above tolerance must be rejected');
+  console.log('  ✓ balance-validation tolerance is unified (UI == backend == 1e-9) with correct boundary behaviour');
+
   console.log('\n✅ All accounting UI contract checks passed.');
 }
 

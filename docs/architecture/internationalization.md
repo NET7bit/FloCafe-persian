@@ -5,7 +5,7 @@ validated, and how the UI language stays separate from a store's regional settin
 
 ## Source of truth and the parity rule
 
-`frontend/src/lib/i18n/messages/en.json` is the canonical message catalogue. It holds 30
+`frontend/src/lib/i18n/messages/en.json` is the canonical message catalogue. It holds 32
 top-level namespaces and 2,932 non-empty string leaves. Every other catalogue under
 `frontend/src/lib/i18n/messages/` must match it exactly: zero missing keys and zero orphan keys.
 
@@ -36,8 +36,9 @@ entry here and nothing else structural. The registry also exports `isLanguage()`
 `getLanguageFromLocale()`, `getLanguageDirection()`, and `getLanguageLocale()`; the reverse map
 from BCP-47 tag to key is derived from `locale`, so the tag and the key cannot drift apart.
 
-The registry key must be a canonical lowercase BCP-47 identifier, which is why a regional variant
-gets a key such as `zh-tw` and a `locale` of `zh-TW`. See [adding a language](../guides/adding-a-language.md).
+The registry key must be a canonical lowercase BCP-47 identifier. For example, the Persian entry uses
+key `fa` with a `locale` of `fa-IR`. A future regional variant would follow the same pattern (e.g. key
+`zh-tw`, `locale` `zh-TW`), but **only `en` and `fa` are currently selectable**. See [adding a language](../guides/adding-a-language.md).
 
 ### Right-to-left languages
 
@@ -91,12 +92,12 @@ subtag.
 Resolution for a candidate tag, in order:
 
 1. An exact `baseName` match against a registered locale.
-2. A maximized `baseName` match, so a bare `de` reaches `de-DE`.
+2. A maximized `baseName` match, so a bare `fa` reaches `fa-IR`.
 3. A same-script, same-language match, and only when exactly one candidate exists.
 
-Step 3 deliberately never crosses a script boundary. A `zh-TW` tag resolves to `zh-tw` and must not
-silently select `zh-CN`; a tag whose script has no unique registered candidate falls through to the
-next preference and ultimately to `en`. A malformed tag is skipped rather than thrown on. When
+Step 3 deliberately never crosses a script boundary. With only `en` (Latin) and `fa` (Arabic)
+registered, a tag whose script has no unique registered candidate falls through to the next preference
+and ultimately to `en`. A malformed tag is skipped rather than thrown on. When
 `navigator` is unavailable, the result is `en`.
 
 ## Message format and key safety

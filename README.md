@@ -139,7 +139,7 @@ FloCafe includes UI translations for:
 
 UI language is independent of store country and regional settings, and tax calculation rules remain a separate concern. For details on contributing translations or adding languages, see the [Internationalization and translation guide](docs/architecture/internationalization.md).
 
-FloCafe ships with 1 country profile (Iran) covering 1 currency (IRR). The profile sets a default currency, locale, and setup timezone; store owners can override the timezone during setup or later in Settings.
+FloCafe ships with exactly one **selectable** country profile (Iran, `IR`) covering one currency (IRR). The profile sets a default currency, locale, and setup timezone; store owners can override the timezone during setup or later in Settings. **The full country registry is retained for backward-compatible resolution of previously stored regional data (legacy records); only `IR` is offered for new selection in the UI.**
 
 <details>
 <summary>Supported country profiles, currencies, and default timezones</summary>

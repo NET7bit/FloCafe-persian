@@ -29,7 +29,7 @@ function emptyLine(): LineDraft {
   return { accountId: '', debit: '', credit: '', description: '' };
 }
 
-const TOLERANCE = 1e-6;
+const TOLERANCE = 1e-9;
 
 /** Per-form dedupe key; LAN clients on insecure origins lack crypto.randomUUID. */
 function newIdempotencyKey(): string {

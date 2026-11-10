@@ -30,7 +30,7 @@ function emptyLine(): LineDraft {
   return { accountId: '', amount: '', description: '' };
 }
 
-const TOLERANCE = 1e-6;
+const TOLERANCE = 1e-9;
 
 /**
  * Opening balance entry. Positive amounts open asset balances; negative
